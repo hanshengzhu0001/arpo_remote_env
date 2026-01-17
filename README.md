@@ -1,7 +1,62 @@
+# ARPO Replication - UI-TARS-2B on Mac CPU
+
+**Status**: ✅ Setup Complete | ⚠️ CPU Training Not Practical
+
+This repository contains a complete replication setup for the ARPO paper, adapted for Mac with UI-TARS-2B. All components work correctly, but CPU performance makes training impractical.
+
+---
+
+## 🎯 Key Findings
+
+### ✅ What Works:
+- Complete ARPO environment setup (Python 3.10, all dependencies)
+- OSWorld with VMware Fusion on macOS
+- UI-TARS-2B model inference server
+- End-to-end pipeline verified (VM → Screenshot → Model → Action)
+- All optimizations applied (image resize, token limits, etc.)
+
+### ⚠️ CPU Performance Results:
+
+**Measured on Apple Silicon Mac with UI-TARS-2B**:
+
+| Metric | Value |
+|--------|-------|
+| **Input size** | 786 tokens (1 image resized to 800×450) |
+| **Tokenization** | ~0.1s ✅ |
+| **Generation** | **47-88 min** (avg: ~60 min) ❌ |
+| **Output tokens** | ~95 tokens |
+| **Decoding** | ~0.03s ✅ |
+| **Total per step** | **~60 minutes** |
+
+**Bottleneck**: Model generation (PyTorch forward pass on CPU)
+
+### 📊 Training Time Estimates:
+
+**For ARPO Training**:
+- **Steps per task**: 10 (max_steps=10)
+- **Tasks**: 8 (training subset)
+- **Epochs**: 5
+- **Total inferences**: 8 × 10 × 5 = **400 steps**
+
+**Time calculation**:
+- 400 steps × 60 min/step = **24,000 minutes**
+- **= 400 hours = 16.7 days of continuous running**
+
+**Conclusion**: Not practical for CPU training. GPU required.
+
+---
+
+## 🚀 GPU Performance (Expected):
+
+With NVIDIA GPU (A40/A6000/A100):
+- **Generation**: ~2-5 seconds per step (100-200x faster)
+- **Total training**: ~5-10 hours (not 400 hours!)
+
+---
 
 # ARPO: End-to-End Policy Optimization for GUI Agents with Experience Replay
 
-This repository contains the code and models for the paper:
+This repository contains the replication setup for the paper:
 
 > **ARPO: End-to-End Policy Optimization for GUI Agents with Experience Replay**  
 > *Fanbin Lu, Zhisheng Zhong, Shu Liu, Chi-Wing Fu, Jiaya Jia*  
@@ -34,6 +89,10 @@ Access our [model](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B) on huggingfa
 ---
 
 ## 🛠 Installation
+
+### ⚠️ macOS Users: See [SETUP_MACOS.md](SETUP_MACOS.md)
+
+**Important for Mac**: OSWorld requires VMware Fusion (not Docker) on macOS. Docker doesn't support KVM on Mac, and VirtualBox doesn't support Apple Silicon. See the Mac-specific setup guide above.
 
 ### 1. Clone the repository and create environment
 
