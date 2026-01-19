@@ -20,8 +20,14 @@ This guide explains how to use **Colab A100 GPU** for inference while keeping yo
 │  │ + ngrok tunnel   │────────►│ Screenshots      │     │
 │  │                  │         │ Actions          │     │
 │  │ ~2-5 sec/step    │         │ Task execution   │     │
+│  │                  │         │                  │     │
+│  │ ⚠️ Inference only│         │ 📁 Results saved │     │
+│  │ (no file access) │         │    locally here  │     │
 │  └──────────────────┘         └──────────────────┘     │
 └─────────────────────────────────────────────────────────┘
+
+Key: Colab GPU = API service only (no result access)
+     Mac = Task execution + result storage
 ```
 
 **Why this works**:
