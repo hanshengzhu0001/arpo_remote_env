@@ -48,21 +48,21 @@ echo ""
 # Create results directory
 mkdir -p results_test_2b/
 
-cd OSWorld
+cd ../OSWorld
 
 python run_uitars.py \
     --headless \
     --observation_type screenshot \
-    --max_steps 3 \
-    --model ui-tars-2b \
-    --temperature 0.7 \
-    --max_tokens 128 \
-    --max_trajectory_length 5 \
-    --test_all_meta_path ./evaluation_examples/test_all.json \
-    --result_dir ../results_test_2b/ \
+    --max_steps 15 \
+    --model ui-tars-7b \
+    --temperature 0.6 \
+    --max_tokens 256 \
+    --max_trajectory_length 15 \
+    --test_all_meta_path ../test_data/osworld_examples/test_10tasks.json \
+    --result_dir ../results/osworld_eval/ \
     2>&1 | tee ../logs/test_osworld_uitars.log
 
-cd ..
+cd ../scripts
 
 echo ""
 echo "=============================================="

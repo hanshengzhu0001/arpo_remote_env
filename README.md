@@ -1,241 +1,181 @@
-# ARPO Replication - UI-TARS-2B on Mac CPU
+# ARPO Replication - Complete Setup
 
-**Status**: ✅ Setup Complete | ⚠️ CPU Training Not Practical
+**Status**: ✅ Setup Complete | 🎯 Ready for GPU Inference Testing
 
-This repository contains a complete replication setup for the ARPO paper, adapted for Mac with UI-TARS-2B. All components work correctly, but CPU performance makes training impractical.
-
----
-
-## 🎯 Key Findings
-
-### ✅ What Works:
-- Complete ARPO environment setup (Python 3.10, all dependencies)
-- OSWorld with VMware Fusion on macOS
-- UI-TARS-2B model inference server
-- End-to-end pipeline verified (VM → Screenshot → Model → Action)
-- All optimizations applied (image resize, token limits, etc.)
-
-### ⚠️ CPU Performance Results:
-
-**Measured on Apple Silicon Mac with UI-TARS-2B**:
-
-| Metric | Value |
-|--------|-------|
-| **Input size** | 786 tokens (1 image resized to 800×450) |
-| **Tokenization** | ~0.1s ✅ |
-| **Generation** | **47-88 min** (avg: ~60 min) ❌ |
-| **Output tokens** | ~95 tokens |
-| **Decoding** | ~0.03s ✅ |
-| **Total per step** | **~60 minutes** |
-
-**Bottleneck**: Model generation (PyTorch forward pass on CPU)
-
-### 📊 Training Time Estimates:
-
-**For ARPO Training**:
-- **Steps per task**: 10 (max_steps=10)
-- **Tasks**: 8 (training subset)
-- **Epochs**: 5
-- **Total inferences**: 8 × 10 × 5 = **400 steps**
-
-**Time calculation**:
-- 400 steps × 60 min/step = **24,000 minutes**
-- **= 400 hours = 16.7 days of continuous running**
-
-**Conclusion**: Not practical for CPU training. GPU required.
+This repository contains a complete ARPO replication with tested inference pipeline for OSWorld GUI tasks.
 
 ---
 
-## 🚀 GPU Performance (Expected):
+## 📊 Performance Findings
 
-With NVIDIA GPU (A40/A6000/A100):
-- **Generation**: ~2-5 seconds per step (100-200x faster)
-- **Total training**: ~5-10 hours (not 400 hours!)
+### CPU Performance (UI-TARS-2B on Mac):
+- **Per step**: ~60 minutes (47-88 min range)
+- **Per task** (10 steps): ~10 hours  
+- **Training** (8 tasks × 5 epochs): ~400 hours (16.7 days)
+- **Conclusion**: ❌ Not practical for training
 
----
-
-# ARPO: End-to-End Policy Optimization for GUI Agents with Experience Replay
-
-This repository contains the replication setup for the paper:
-
-> **ARPO: End-to-End Policy Optimization for GUI Agents with Experience Replay**  
-> *Fanbin Lu, Zhisheng Zhong, Shu Liu, Chi-Wing Fu, Jiaya Jia*  
-> CUHK, SmartMore, HKUST  
-> [[Paper](https://arxiv.org/abs/2505.16282)] • [[Project Page](https://github.com/dvlab-research/ARPO)] • [[Model on HF](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B)]
-
-## Overview
-
-**ARPO (Agentic Replay Policy Optimization)** is a novel reinforcement learning framework designed to train **vision-language GUI agents** to complete **long-horizon desktop tasks**. It builds upon **Group Relative Policy Optimization (GRPO)** and introduces:
-
-- **Distributed Rollouts**: Scalable task execution across parallel OSWorld environments with docker.  
-- **Multi-modal Input Support**: Processes long histories (15 steps) of screenshots + actions in an end-to-end way.
-
-Access our [model](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B) on huggingface and view [training logs](https://wandb.ai/fanbinlu/arpo) on the Weights & Biases.
-
-<p align="center">
-<img src="assets/traj_reward.png" alt="Trajectory reward during trainig" width="500">
-</p>
-
-## 📊 Results on OSWorld
-
-| Model                        |  128 training tasks | OSWorld overall|
-|-----------------------------|---------|-------|
-| UI-Tars-1.5                |68.7% | 23.5%   | 
-| UI-Tars-1.5 + GRPO         |72.9% | 26.0%   | 
-| **UI-Tars-1.5 + ARPO (Ours)** |83.9% | **29.9%** |
-
-> Evaluated with a max of **15 steps per trajectory**.
+### GPU Performance (Expected with UI-TARS-7B):
+- **Per step**: 2-5 seconds (100-200x faster)
+- **Per task**: 20-50 seconds
+- **Training** (128 tasks × 15 epochs): 5-15 hours
+- **Conclusion**: ✅ Practical and matches paper
 
 ---
 
-## 🛠 Installation
+## 📁 Project Structure
 
-### ⚠️ macOS Users: See [SETUP_MACOS.md](SETUP_MACOS.md)
+```
+ARPO_replicate/
+├── README.md                    # This file
+├── requirements.txt             # Python dependencies
+│
+├── docs/                        # Documentation
+│   ├── START_HERE.md           # Quick start guide
+│   ├── TRAINING_GUIDE.md       # Complete training instructions
+│   ├── PAPER_SUMMARY.md        # ARPO paper deep dive
+│   ├── PERFORMANCE_REPORT.md   # CPU/GPU performance analysis
+│   ├── TROUBLESHOOTING.md      # Problem solving
+│   └── FILES.md                # File overview
+│
+├── configs/                     # Training configurations
+│   └── config_uitars_2b_mac.yaml  # VERL training config
+│
+├── scripts/                     # Executable scripts
+│   ├── uitars_2b_server.py     # UI-TARS-2B inference server (CPU tested)
+│   ├── uitars_7b_server.py     # UI-TARS-7B inference server (GPU)
+│   ├── train_uitars_2b_arpo.sh # Training script (2B)
+│   ├── test_server.sh          # Server test
+│   ├── test_single_task.sh     # Single task test
+│   └── test_osworld_uitars.sh  # OSWorld integration test
+│
+├── notebooks/                   # Jupyter notebooks
+│   ├── ARPO_UITARS_Inference.ipynb      # GPU inference (tested) ⭐
+│   ├── ARPO_OSWorld_Evaluation.ipynb    # Evaluation on 10 tasks (NEW) ⭐
+│   └── arpo_training_notebook.ipynb     # Training guide
+│
+├── test_data/                   # Test tasks
+│   └── osworld_examples/
+│       ├── tasks/              # 5 original tasks
+│       └── noisy_tasks/        # 5 noisy tasks
+│
+├── OSWorld/                     # OSWorld benchmark (submodule)
+├── verl/                        # VERL training framework  
+└── examples/                    # Example training scripts
+```
 
-**Important for Mac**: OSWorld requires VMware Fusion (not Docker) on macOS. Docker doesn't support KVM on Mac, and VirtualBox doesn't support Apple Silicon. See the Mac-specific setup guide above.
+---
 
-### 1. Clone the repository and create environment
+## 🚀 Quick Start
 
+### For GPU Inference Testing (Colab/VSCode):
+
+1. **Open notebook**:
+   ```bash
+   notebooks/ARPO_OSWorld_Evaluation.ipynb
+   ```
+
+2. **Run all cells** - It will:
+   - Load ARPO UITARS 7B model (4-bit quantized)
+   - Test on 5 original + 5 noisy OSWorld tasks
+   - Generate results and metrics
+
+**Time**: ~30-60 minutes on A100 GPU
+
+### For CPU Testing (Mac):
+
+See `docs/START_HERE.md` for CPU setup (not recommended for training).
+
+---
+
+## 📊 Test Data
+
+**From**: [gowathena/arpo_replica/tree/data](https://github.com/gowathena/arpo_replica/tree/data)
+
+**Tasks**:
+- **5 Original tasks**: Standard OSWorld Chrome tasks
+- **5 Noisy tasks**: Same tasks with distractor entries
+
+**Format**: Compatible with OSWorld evaluation_examples
+
+---
+
+## 🎯 Models
+
+### UI-TARS-2B (Tested on CPU):
+- **Model**: ByteDance-Seed/UI-TARS-2B-SFT
+- **Size**: 2B parameters
+- **Performance**: ~60 min/step on CPU
+- **Use**: Development/testing only
+
+### UI-TARS-7B (For GPU):
+- **Model**: [Fanbin/ARPO_UITARS1.5_7B](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B) ⭐
+- **Size**: 7B parameters (ARPO-trained)
+- **Performance**: 2-5 sec/step on GPU
+- **Results**: 83.9% on 128 tasks, 29.9% overall
+- **Use**: Production training/evaluation
+
+---
+
+## 🔧 Setup
+
+### Requirements:
+- Python 3.10+
+- For GPU: CUDA 11.8+, 16GB+ VRAM
+- For CPU: 16GB+ RAM (very slow, not recommended)
+
+### Install:
 ```bash
-git clone --recurse-submodules https://github.com/dvlab-research/ARPO.git
-cd ARPO
-
-# Create and activate Conda environment
-conda create -n arpo python=3.10
-conda activate arpo
-
-# Install Python dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Install OSWorld
-Follow the origin installation guide of [OSWorld](https://github.com/xlang-ai/OSWorld) if you only want to evaluate the model. If you want to train with GRPO, you are required to pip install it.
-```bash
-cd OSWorld
-pip install -e .
-cd ..
-```
+### OSWorld Setup (Optional):
+Only needed for full training, not for inference testing with notebooks.
 
-> 💡 We strongly recommend running a full evaluation **with Docker** before training to prepare the docker image, Ubuntu VM data, and cache_dir required.
+See `docs/START_HERE.md` for complete setup.
 
-
-## ⚙️ Setup for Evaluation with OSWorld
-
-To evaluate ARPO on the OSWorld benchmark with the [released model](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B) using Docker-based virtual environments, follow these steps:
-
-### 1. **Prepare the Environment**
-
-Ensure you have correctly installed [OSWorld](https://github.com/xlang-ai/OSWorld) by following its Docker setup instructions. Once OSWorld is set up:
-
-```bash
-nohup bash start_server.sh &
-```
-
-### 2. **Run Evaluation Script**
-
-Navigate into the OSWorld directory and execute the evaluation script:
-
-```bash
-cd OSWorld
-
-python run_multienv_uitars.py \
-    --headless \
-    --observation_type screenshot \
-    --max_steps 15 \
-    --max_trajectory_length 15 \
-    --temperature 0.6 \
-    --model ui-tars \
-    --action_space pyautogui \
-    --num_envs 8 \
-    --result_dir ./results/ \
-    --test_all_meta_path ./evaluation_examples/test_all.json \
-    --trial-id 0 \
-    --server_ip http://127.0.0.1
-```
-
-### ✅ Parameters Explained
-
-- `--headless`: Enables headless mode (no GUI rendering).
-- `--observation_type screenshot`: Use visual observations for the agent.
-- `--max_steps` / `--max_trajectory_length`: Limit per-task interaction steps.
-- `--temperature`: Sampling temperature for model output.
-- `--model`: Name of the model.
-- `--num_envs`: Number of parallel environments (VMs).
-- `--result_dir`: Directory to store evaluation results.
-- `--test_all_meta_path`: JSON file with evaluation task metadata.
-- `--trial-id`: ID for the evaluation trial.
-- `--server_ip`: IP of the evaluation server (usually localhost).
-
-> You will find vmware_vm_data/, docker_vm_data/, and cache/ folders under the OSWorld after evaluation.
 ---
 
-## ⚙️ Setup for GRPO Training
+## 📖 Documentation
 
-```bash
-# Link evaluation examples and cache
-ln -s $(pwd)/OSWorld/evaluation_examples ./
-mkdir cache_dirs/
-ln -s $(pwd)/OSWorld/cache ./cache_dirs/cache_0
-ln -s $(pwd)/OSWorld/vmware_vm_data ./
-ln -s $(pwd)/OSWorld/docker_vm_data ./
-```
+- **Quick Start**: `docs/START_HERE.md`
+- **Training Guide**: `docs/TRAINING_GUIDE.md`
+- **Paper Summary**: `docs/PAPER_SUMMARY.md`
+- **Performance**: `docs/PERFORMANCE_REPORT.md`
+- **Troubleshooting**: `docs/TROUBLESHOOTING.md`
 
-To run Docker without `sudo`:
+---
 
-```bash
-sudo usermod -aG docker $USER
-newgrp docker
+## 🎓 What This Repository Provides
+
+1. ✅ **Complete ARPO environment**
+2. ✅ **Tested inference pipeline** (CPU with 2B, ready for GPU with 7B)
+3. ✅ **OSWorld integration**
+4. ✅ **Test data** (10 tasks: 5 original + 5 noisy)
+5. ✅ **Training scripts** (VERL framework configured)
+6. ✅ **Comprehensive documentation**
+
+---
+
+## 📝 Citation
+
+```bibtex
+@article{lu2025arpo,
+  title={ARPO: End-to-End Policy Optimization for GUI Agents with Experience Replay},
+  author={Fanbin Lu and Zhisheng Zhong and Shu Liu and Chi-Wing Fu and Jiaya Jia},
+  journal={arXiv},
+  year={2025}
+}
 ```
 
 ---
 
-## Training ARPO/GRPO with OSWorld
+## 🔗 Links
 
-### Single Node (subset training: 32 tasks)
-If you only have one node, we suggest training on a subset of OSWorld tasks with at most 16 Docker environments.
-```bash
-RAY_PORT=2468
-RAY_HEAD_IP=<Your IP>
-ray start --head --port=$RAY_PORT --resources='{"docker:'$RAY_HEAD_IP'": 128}'
-bash ./examples/osworld_subset32.sh
-```
-
-### Multi-Node Setup with Ray (e.g. 8 nodes, 128 envs)
-
-On **Ray master node**:
-
-```bash
-RAY_PORT=2468
-RAY_HEAD_IP=<Your IP>
-ray start --head --port=$RAY_PORT --resources='{"docker:'$RAY_HEAD_IP'": 128}'
-```
-
-On **Ray slave nodes** (with GPU):
-
-```bash
-ray start --address=$RAY_HEAD_IP:$RAY_PORT --num-gpus=8 --resources='{"docker:'$CURRENT_IP'": 128}'
-```
-
-Or (CPU only):
-
-```bash
-ray start --address=$RAY_HEAD_IP:$RAY_PORT --resources='{"docker:'$CURRENT_IP'": 128}'
-```
-
-Then run:
-
-```bash
-bash ./examples/osworld_full_arpo.sh
-```
+- **Paper**: [arXiv](https://arxiv.org/abs/2505.16282)
+- **Original Code**: [JIA-Lab-research/ARPO](https://github.com/JIA-Lab-research/ARPO)
+- **ARPO Model**: [Fanbin/ARPO_UITARS1.5_7B](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B)
+- **OSWorld**: [xlang-ai/OSWorld](https://github.com/xlang-ai/OSWorld)
 
 ---
 
-## 🔗 Related Projects
-
-- [OSWorld](https://github.com/FanbinLu/OSWorld) — Realistic GUI environments for multimodal agents modified for GRPO training.
-- [EasyR1](https://github.com/hiyouga/EasyR1) An efficient, scalable, multi-modality RL training framework based on veRL, supporting advanced VLMs and algorithms like GRPO.
----
-
-## 📄 Citation
-
-If you find ARPO useful, please consider citing our work.
+**Ready to test with GPU!** 🚀 See `notebooks/ARPO_OSWorld_Evaluation.ipynb`
