@@ -1,24 +1,78 @@
-# ARPO Replication - Complete Setup
+# ARPO Replication
 
-**Status**: ✅ Setup Complete | 🎯 Ready for GPU Inference Testing
+**Status**: ✅ Ready for GPU Evaluation
 
-This repository contains a complete ARPO replication with tested inference pipeline for OSWorld GUI tasks.
+Complete ARPO replication with OSWorld integration for GUI agent training and evaluation.
 
 ---
 
-## 📊 Performance Findings
+## 🚀 Quick Start
 
-### CPU Performance (UI-TARS-2B on Mac):
-- **Per step**: ~60 minutes (47-88 min range)
-- **Per task** (10 steps): ~10 hours  
-- **Training** (8 tasks × 5 epochs): ~400 hours (16.7 days)
-- **Conclusion**: ❌ Not practical for training
+### 1. Environment Setup
 
-### GPU Performance (Expected with UI-TARS-7B):
-- **Per step**: 2-5 seconds (100-200x faster)
-- **Per task**: 20-50 seconds
-- **Training** (128 tasks × 15 epochs): 5-15 hours
-- **Conclusion**: ✅ Practical and matches paper
+```bash
+# Clone repository
+git clone https://github.com/gowathena/arpo_replica.git
+cd arpo_replica
+git checkout arpo-cpu-replicate
+
+# Initialize OSWorld submodule
+git submodule update --init --recursive
+
+# Create conda environment
+conda create -n arpo python=3.10 -y
+conda activate arpo
+
+# Install dependencies
+pip install -r requirements.txt
+cd OSWorld && pip install -r requirements.txt && pip install -e . && cd ..
+```
+
+### 2. OSWorld Setup (Mac with VMware Fusion)
+
+```bash
+# Install VMware Fusion (if not installed)
+# Download from: https://www.vmware.com/products/fusion.html
+
+# Setup OSWorld VM
+cd OSWorld
+python -m desktop_env.providers.vmware.setup
+
+# Test VM connection
+python -c "from desktop_env.providers.vmware import VMwareProvider; p = VMwareProvider(); print('VM ready:', p.is_vm_running())"
+```
+
+**Note**: For Linux/Docker setup, see [OSWorld documentation](https://github.com/xlang-ai/OSWorld).
+
+### 3. GPU Server (Colab)
+
+1. **Open**: `notebooks/GPU_Server_for_OSWorld.ipynb` in [Google Colab](https://colab.research.google.com)
+2. **Runtime** → **Change runtime type** → **A100 GPU**
+3. **Run cells 1-5**:
+   - Cell 1: Install dependencies
+   - Cell 2: Configure ngrok (enter authtoken when prompted)
+   - Cell 3: Load model (~2 min)
+   - Cell 4: Create Flask server
+   - Cell 5: Start server + get public URL
+4. **Copy ngrok URL** from Cell 5 output
+
+### 4. Evaluation (Mac)
+
+1. **Open**: `notebooks/ARPO_OSWorld_Evaluation.ipynb` in VSCode
+2. **Select kernel**: `arpo` (Python 3.10)
+3. **Update Cell 4**: Paste ngrok URL from Colab
+4. **Run all cells**: Evaluates 5 original + 5 noisy tasks
+
+**Expected time**: ~10-15 minutes for 10 tasks
+
+---
+
+## 📊 Results
+
+**Current Performance** (ARPO UITARS 7B):
+- **Original tasks**: 20% success rate (1/5)
+- **Per step**: 2-5 seconds on A100 GPU
+- **Per task**: ~30-75 seconds
 
 ---
 
@@ -26,133 +80,41 @@ This repository contains a complete ARPO replication with tested inference pipel
 
 ```
 ARPO_replicate/
-├── README.md                    # This file
-├── requirements.txt             # Python dependencies
-│
-├── docs/                        # Documentation
-│   ├── START_HERE.md           # Quick start guide
-│   ├── TRAINING_GUIDE.md       # Complete training instructions
-│   ├── PAPER_SUMMARY.md        # ARPO paper deep dive
-│   ├── PERFORMANCE_REPORT.md   # CPU/GPU performance analysis
-│   ├── TROUBLESHOOTING.md      # Problem solving
-│   └── FILES.md                # File overview
-│
-├── configs/                     # Training configurations
-│   └── config_uitars_2b_mac.yaml  # VERL training config
-│
-├── scripts/                     # Executable scripts
-│   ├── uitars_2b_server.py     # UI-TARS-2B inference server (CPU tested)
-│   ├── uitars_7b_server.py     # UI-TARS-7B inference server (GPU)
-│   ├── train_uitars_2b_arpo.sh # Training script (2B)
-│   ├── test_server.sh          # Server test
-│   ├── test_single_task.sh     # Single task test
-│   └── test_osworld_uitars.sh  # OSWorld integration test
-│
-├── notebooks/                   # Jupyter notebooks
-│   ├── ARPO_UITARS_Inference.ipynb      # GPU inference (tested) ⭐
-│   ├── ARPO_OSWorld_Evaluation.ipynb    # Evaluation on 10 tasks (NEW) ⭐
-│   └── arpo_training_notebook.ipynb     # Training guide
-│
-├── test_data/                   # Test tasks
-│   └── osworld_examples/
-│       ├── tasks/              # 5 original tasks
-│       └── noisy_tasks/        # 5 noisy tasks
-│
-├── OSWorld/                     # OSWorld benchmark (submodule)
-├── verl/                        # VERL training framework  
-└── examples/                    # Example training scripts
+├── notebooks/
+│   ├── GPU_Server_for_OSWorld.ipynb      # Colab GPU server
+│   └── ARPO_OSWorld_Evaluation.ipynb     # Mac evaluation
+├── scripts/
+│   ├── uitars_7b_server.py                # Standalone GPU server
+│   └── test_osworld_uitars.sh            # OSWorld test script
+├── test_data/osworld_examples/           # 10 test tasks
+├── OSWorld/                               # OSWorld benchmark (submodule)
+└── verl/                                  # VERL training framework
 ```
-
----
-
-## 🚀 Quick Start
-
-### For GPU Inference Testing (Colab/VSCode):
-
-1. **Open notebook**:
-   ```bash
-   notebooks/ARPO_OSWorld_Evaluation.ipynb
-   ```
-
-2. **Run all cells** - It will:
-   - Load ARPO UITARS 7B model (4-bit quantized)
-   - Test on 5 original + 5 noisy OSWorld tasks
-   - Generate results and metrics
-
-**Time**: ~30-60 minutes on A100 GPU
-
-### For CPU Testing (Mac):
-
-See `docs/START_HERE.md` for CPU setup (not recommended for training).
-
----
-
-## 📊 Test Data
-
-**From**: [gowathena/arpo_replica/tree/data](https://github.com/gowathena/arpo_replica/tree/data)
-
-**Tasks**:
-- **5 Original tasks**: Standard OSWorld Chrome tasks
-- **5 Noisy tasks**: Same tasks with distractor entries
-
-**Format**: Compatible with OSWorld evaluation_examples
 
 ---
 
 ## 🎯 Models
 
-### UI-TARS-2B (Tested on CPU):
-- **Model**: ByteDance-Seed/UI-TARS-2B-SFT
-- **Size**: 2B parameters
-- **Performance**: ~60 min/step on CPU
-- **Use**: Development/testing only
-
-### UI-TARS-7B (For GPU):
-- **Model**: [Fanbin/ARPO_UITARS1.5_7B](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B) ⭐
-- **Size**: 7B parameters (ARPO-trained)
-- **Performance**: 2-5 sec/step on GPU
-- **Results**: 83.9% on 128 tasks, 29.9% overall
-- **Use**: Production training/evaluation
-
----
-
-## 🔧 Setup
-
-### Requirements:
-- Python 3.10+
-- For GPU: CUDA 11.8+, 16GB+ VRAM
-- For CPU: 16GB+ RAM (very slow, not recommended)
-
-### Install:
-```bash
-pip install -r requirements.txt
-```
-
-### OSWorld Setup (Optional):
-Only needed for full training, not for inference testing with notebooks.
-
-See `docs/START_HERE.md` for complete setup.
+- **ARPO UITARS 7B**: [Fanbin/ARPO_UITARS1.5_7B](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B)
+  - 7B parameters, ARPO-trained
+  - Performance: 83.9% on 128 tasks, 29.9% overall
 
 ---
 
 ## 📖 Documentation
 
-- **Quick Start**: `docs/START_HERE.md`
+- **GPU Setup**: `GPU_SETUP_GUIDE.md`
+- **Colab Instructions**: `COLAB_INSTRUCTIONS.md`
 - **Training Guide**: `docs/TRAINING_GUIDE.md`
 - **Paper Summary**: `docs/PAPER_SUMMARY.md`
-- **Performance**: `docs/PERFORMANCE_REPORT.md`
-- **Troubleshooting**: `docs/TROUBLESHOOTING.md`
 
 ---
 
-## 🎓 What This Repository Provides
+## 🔗 Links
 
-1. ✅ **Complete ARPO environment**
-2. ✅ **Tested inference pipeline** (CPU with 2B, ready for GPU with 7B)
-3. ✅ **OSWorld integration**
-4. ✅ **Test data** (10 tasks: 5 original + 5 noisy)
-5. ✅ **Training scripts** (VERL framework configured)
-6. ✅ **Comprehensive documentation**
+- **Paper**: [arXiv:2505.16282](https://arxiv.org/abs/2505.16282)
+- **Original Code**: [JIA-Lab-research/ARPO](https://github.com/JIA-Lab-research/ARPO)
+- **OSWorld**: [xlang-ai/OSWorld](https://github.com/xlang-ai/OSWorld)
 
 ---
 
@@ -166,16 +128,3 @@ See `docs/START_HERE.md` for complete setup.
   year={2025}
 }
 ```
-
----
-
-## 🔗 Links
-
-- **Paper**: [arXiv](https://arxiv.org/abs/2505.16282)
-- **Original Code**: [JIA-Lab-research/ARPO](https://github.com/JIA-Lab-research/ARPO)
-- **ARPO Model**: [Fanbin/ARPO_UITARS1.5_7B](https://huggingface.co/Fanbin/ARPO_UITARS1.5_7B)
-- **OSWorld**: [xlang-ai/OSWorld](https://github.com/xlang-ai/OSWorld)
-
----
-
-**Ready to test with GPU!** 🚀 See `notebooks/ARPO_OSWorld_Evaluation.ipynb`
