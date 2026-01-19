@@ -9,7 +9,7 @@ Requires: CUDA GPU with 16GB+ VRAM
 """
 
 import torch
-from transformers import Qwen2VLForConditionalGeneration, AutoProcessor, BitsAndBytesConfig
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
 from flask import Flask, request, jsonify
 import base64
 from io import BytesIO
