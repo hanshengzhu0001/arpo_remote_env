@@ -50,6 +50,15 @@ python -c "from desktop_env.providers.vmware import VMwareProvider; p = VMwarePr
 - Captures screenshots for the model
 - Runs applications (Chrome, Firefox, etc.)
 
+**VM Configuration Options**:
+- **OS**: Ubuntu (default) or Windows
+- **Screen**: 1920x1080 (default), configurable
+- **Mode**: Headless (background) or visible window
+- **Action space**: `pyautogui` or `computer_13`
+- **Observation**: Screenshot, accessibility tree, or both
+
+See `docs/VM_CONFIGURATION.md` for full configuration details.
+
 **Note**: For Linux/Docker setup, see [OSWorld documentation](https://github.com/xlang-ai/OSWorld).
 
 ### 3. GPU Server (Colab)
