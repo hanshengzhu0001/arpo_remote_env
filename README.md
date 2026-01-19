@@ -78,20 +78,21 @@ See `docs/VM_CONFIGURATION.md` for full configuration details.
 1. **Open**: `notebooks/ARPO_OSWorld_Evaluation.ipynb` in VSCode
 2. **Select kernel**: `arpo` (Python 3.10)
 3. **Update Cell 4**: Paste ngrok URL from Colab
-4. **Run all cells**: Evaluates 5 original + 5 noisy tasks
+4. **Run all cells**: Evaluates 10 original + 10 noisy Chrome tasks
 
-**Expected time**: ~45-50 minutes for 10 tasks (based on actual test: 22m 40s for 5 tasks)
+**Expected time**: ~1.5 hours for 20 tasks (based on actual test: 22m 40s for 5 tasks)
 
 ---
 
 ## 📊 Results
 
 **Current Performance** (ARPO UITARS 7B on A100 GPU):
-- **Original tasks**: 20% success rate (1/5)
-- **5 tasks**: 22m 40s total (~4.5 min per task)
-- **Per step**: 2-5 seconds inference (model only)
-- **Per task**: ~4-5 minutes (includes VM overhead, network latency, execution)
-- **10 tasks**: ~45-50 minutes estimated
+- **Tested**: 5 Chrome tasks (initial test)
+- **Success rate**: 20% (1/5 tasks passed)
+- **Time per task**: ~4.5 minutes (includes VM overhead, network, execution)
+- **Model inference**: 2-5 seconds per step
+- **Estimated for 10 Chrome tasks**: ~45 minutes
+- **Estimated for 20 tasks (10 original + 10 noisy)**: ~1.5 hours
 
 ---
 
