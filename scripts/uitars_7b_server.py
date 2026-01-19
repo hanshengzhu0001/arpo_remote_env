@@ -9,7 +9,7 @@ Requires: CUDA GPU with 16GB+ VRAM
 """
 
 import torch
-from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+from transformers import AutoModel, AutoProcessor
 from flask import Flask, request, jsonify
 import base64
 from io import BytesIO
@@ -41,8 +41,8 @@ print("This will take 1-2 minutes on first run...")
 # Load processor
 processor = AutoProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
-# Load model (no quantization for best quality)
-model = Qwen2VLForConditionalGeneration.from_pretrained(
+# Load model (use AutoModel to auto-detect architecture)
+model = AutoModel.from_pretrained(
     MODEL_NAME,
     device_map="auto",
     trust_remote_code=True,
