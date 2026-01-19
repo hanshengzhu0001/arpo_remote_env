@@ -1,21 +1,72 @@
-numpy
-wandb
-tqdm
-accelerate==1.4.0
-codetiming==1.4.0
-datasets==3.3.2
-filelock==3.18.0
-flash_attn==2.7.4.post1
-liger_kernel==0.5.6
-mathruler==0.1.0
-mlflow==2.22.0
-omegaconf==2.3.0
-Pillow==11.2.1
-psutil==6.1.0
-PyYAML==6.0.2
-qwen_vl_utils==0.0.11
-swanlab==0.5.8
-tensordict==0.5.0
+# Core ML/AI packages
 torch==2.5.1
-torchdata==0.11.0
-vllm==0.7.3
+transformers==4.57.6
+accelerate==1.4.0
+qwen-vl-utils==0.0.11
+
+# OSWorld dependencies
+numpy==1.26.4
+Pillow==11.2.1
+opencv-python==4.8.1.78
+pyautogui==0.9.54
+pynput==1.7.6
+gymnasium==0.28.1
+psutil==6.1.0
+tqdm==4.65.0
+pandas==2.2.3
+matplotlib==3.7.4
+
+# API clients
+openai==2.15.0
+requests==2.32.5
+requests-toolbelt==1.0.0
+backoff
+
+# Web server (for inference servers)
+flask==3.0.0
+
+# Utilities
+PyYAML==6.0.2
+lxml
+cssselect
+xmltodict
+beautifulsoup4
+tiktoken
+loguru
+
+# Document processing (for OSWorld tasks)
+openpyxl
+python-docx
+python-pptx
+pypdf
+pymupdf
+pdfplumber
+odfpy
+
+# Media processing
+ImageHash
+scikit-image
+librosa
+mutagen
+pyacoustid
+pygame
+
+# Other OSWorld dependencies
+PyGetWindow
+rapidfuzz
+playwright
+func-timeout
+formulas
+fastdtw
+easyocr
+gdown
+wrapt_timeout_decorator
+fabric
+
+# Monitoring
+wandb
+
+# Note: Skip GPU-only packages for Mac CPU compatibility:
+# - flash_attn (GPU only)
+# - liger_kernel (GPU only)
+# - vllm (GPU only)
