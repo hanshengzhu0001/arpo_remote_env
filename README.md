@@ -63,16 +63,18 @@ python -c "from desktop_env.providers.vmware import VMwareProvider; p = VMwarePr
 3. **Update Cell 4**: Paste ngrok URL from Colab
 4. **Run all cells**: Evaluates 5 original + 5 noisy tasks
 
-**Expected time**: ~10-15 minutes for 10 tasks
+**Expected time**: ~45-50 minutes for 10 tasks (based on actual test: 22m 40s for 5 tasks)
 
 ---
 
 ## 📊 Results
 
-**Current Performance** (ARPO UITARS 7B):
+**Current Performance** (ARPO UITARS 7B on A100 GPU):
 - **Original tasks**: 20% success rate (1/5)
-- **Per step**: 2-5 seconds on A100 GPU
-- **Per task**: ~30-75 seconds
+- **5 tasks**: 22m 40s total (~4.5 min per task)
+- **Per step**: 2-5 seconds inference (model only)
+- **Per task**: ~4-5 minutes (includes VM overhead, network latency, execution)
+- **10 tasks**: ~45-50 minutes estimated
 
 ---
 
