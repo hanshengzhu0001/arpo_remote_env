@@ -35,27 +35,18 @@ print(f"💾 GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 102
 # Model configuration
 MODEL_NAME = "Fanbin/ARPO_UITARS1.5_7B"
 
-print(f"\n📥 Loading ARPO UITARS 7B model with 4-bit quantization...")
+print(f"\n📥 Loading ARPO UITARS 7B model (full precision)...")
 print("This will take 1-2 minutes on first run...")
 
 # Load processor
 processor = AutoProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
-# Configure 4-bit quantization for memory efficiency
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_compute_dtype=torch.float16,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4"
-)
-
-# Load model
+# Load model (no quantization for best quality)
 model = Qwen2VLForConditionalGeneration.from_pretrained(
     MODEL_NAME,
-    quantization_config=quantization_config,
     device_map="auto",
     trust_remote_code=True,
-    torch_dtype=torch.float16,
+    torch_dtype=torch.bfloat16,  # Use bfloat16 for A100
 )
 model.eval()
 
