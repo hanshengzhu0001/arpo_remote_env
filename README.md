@@ -30,17 +30,25 @@ cd OSWorld && pip install -r requirements.txt && pip install -e . && cd ..
 
 ### 2. OSWorld Setup (Mac with VMware Fusion)
 
+**VMware runs the execution environment** - a Ubuntu VM where GUI tasks are executed.
+
 ```bash
 # Install VMware Fusion (if not installed)
 # Download from: https://www.vmware.com/products/fusion.html
 
-# Setup OSWorld VM
+# Setup OSWorld VM (downloads ~38GB Ubuntu VM)
 cd OSWorld
 python -m desktop_env.providers.vmware.setup
 
 # Test VM connection
 python -c "from desktop_env.providers.vmware import VMwareProvider; p = VMwareProvider(); print('VM ready:', p.is_vm_running())"
 ```
+
+**What VMware does**:
+- Runs Ubuntu desktop environment
+- Executes GUI actions (clicks, typing, etc.)
+- Captures screenshots for the model
+- Runs applications (Chrome, Firefox, etc.)
 
 **Note**: For Linux/Docker setup, see [OSWorld documentation](https://github.com/xlang-ai/OSWorld).
 
