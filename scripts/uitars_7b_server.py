@@ -9,7 +9,7 @@ Requires: CUDA GPU with 16GB+ VRAM
 """
 
 import torch
-from transformers import AutoModel, AutoProcessor
+from transformers import AutoModelForVision2Seq, AutoProcessor
 from flask import Flask, request, jsonify
 import base64
 from io import BytesIO
@@ -41,8 +41,8 @@ print("This will take 1-2 minutes on first run...")
 # Load processor
 processor = AutoProcessor.from_pretrained(MODEL_NAME, trust_remote_code=True)
 
-# Load model (use AutoModel to auto-detect architecture)
-model = AutoModel.from_pretrained(
+# Load model (use AutoModelForVision2Seq for generation)
+model = AutoModelForVision2Seq.from_pretrained(
     MODEL_NAME,
     device_map="auto",
     trust_remote_code=True,
