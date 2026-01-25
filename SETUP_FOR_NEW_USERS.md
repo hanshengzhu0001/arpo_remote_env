@@ -2,16 +2,20 @@
 
 If you're getting "vmrun: command not found", follow these steps:
 
-## Step 1: Install VMware Fusion
+## Step 1: Install VMware Fusion (Required!)
 
-### Download VMware Fusion
-- **Official site**: https://www.vmware.com/products/fusion.html
-- **Broadcom** (new owner): https://support.broadcom.com/group/ecx/productdownloads?subfamily=VMware+Fusion
+**⚠️ IMPORTANT**: The Ubuntu VM (~38GB) is NOT included in the repository. Each user must download it separately!
 
-### Install
-1. Download the `.dmg` file
-2. Open it and drag VMware Fusion to Applications
-3. Launch VMware Fusion once to complete setup
+### A. Download VMware Fusion
+- **Free for personal use**: https://www.vmware.com/products/fusion.html
+- **Broadcom download**: https://support.broadcom.com/group/ecx/productdownloads?subfamily=VMware+Fusion
+
+### B. Install VMware Fusion
+1. Download the `.dmg` file (~600MB)
+2. Open the `.dmg` and drag VMware Fusion to Applications folder
+3. Launch VMware Fusion once
+4. Follow the setup wizard (accept license, etc.)
+5. Close VMware Fusion (we'll use command-line)
 
 ---
 
@@ -73,6 +77,8 @@ pip install -r requirements.txt
 cd OSWorld && pip install -r requirements.txt && pip install -e . && cd ..
 ```
 
+**Note**: Ubuntu VM is NOT included in the repository! It will auto-download (~38GB, ~10 minutes) on first run.
+
 ---
 
 ## Step 5: Update Colab Server URL
@@ -89,13 +95,39 @@ base_url="https://YOUR-NGROK-URL.ngrok-free.dev/v1"
 
 ---
 
-## Step 6: Run Evaluation
+## Step 6: First Run (Downloads VM Automatically)
 
-Open `notebooks/ARPO_OSWorld_Evaluation.ipynb` in VSCode or Jupyter:
+**⚠️ First run will download Ubuntu VM (~38GB, takes ~10 minutes)**
+
+```bash
+# Start a simple test to trigger VM download
+cd OSWorld
+python run_uitars.py \
+    --headless \
+    --observation_type screenshot \
+    --max_steps 3 \
+    --test_config_base_dir ../test_data/osworld_examples \
+    --test_all_meta_path ../test_data/osworld_examples/test_chrome_10.json \
+    --result_dir ../results/test/
+```
+
+You'll see:
+```
+Downloading the virtual machine image... (~15GB download)
+Unzipping... (~5 minutes)
+Starting VM...
+VM is ready!
+```
+
+VM downloads to: `OSWorld/vmware_vm_data/Ubuntu0/` (38GB total)
+
+## Step 7: Run Full Evaluation
+
+After VM is downloaded, open `notebooks/ARPO_OSWorld_Evaluation.ipynb`:
 
 1. Select `arpo` kernel
 2. Update Cell 4 with your Colab ngrok URL
-3. Run cells in order (1, 2, 4, 6, 8, 10, ...)
+3. Run cells in order
 
 ---
 
