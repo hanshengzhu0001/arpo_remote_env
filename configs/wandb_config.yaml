@@ -2,9 +2,9 @@
 
 wandb:
   enabled: true
-  entity: "YOUR-WANDB-ENTITY"  # e.g., "athenazh-university-of-pennsylvania"
+  entity: "hanszhu05-university-of-pennsylvania-org"
   project: "arpo-uitars-training"
-  name: "uitars-2b-128tasks"  # Run name
+  name: "uitars-2b-128tasks-epoch1"  # Run name
   
   # What to log
   log_frequency: 1  # Log every episode
