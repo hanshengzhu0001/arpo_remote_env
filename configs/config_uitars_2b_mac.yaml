@@ -90,10 +90,11 @@ env:
   headless: true
 
 trainer:
-  total_episodes: 5  # Reduced for quick iteration
+  total_episodes: 10  # 10 epochs for full training
   logger: ["console", "wandb"]
-  project_name: arpo_mac
-  experiment_name: uitars_2b_cpu_mac
+  project_name: arpo-uitars-training
+  experiment_name: uitars_2b_128tasks
+  wandb_entity: "YOUR-WANDB-ENTITY"  # ⬅️ UPDATE THIS
   n_gpus_per_node: 0  # CPU only
   nnodes: 1
   val_freq: 2  # Validate every 2 epochs
