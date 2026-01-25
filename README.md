@@ -33,16 +33,21 @@ cd OSWorld && pip install -r requirements.txt && pip install -e . && cd ..
 **VMware runs the execution environment** - a Ubuntu VM where GUI tasks are executed.
 
 ```bash
-# Install VMware Fusion (if not installed)
+# A. Install VMware Fusion (if not installed)
 # Download from: https://www.vmware.com/products/fusion.html
 
-# Setup OSWorld VM (downloads ~38GB Ubuntu VM)
-cd OSWorld
-python -m desktop_env.providers.vmware.setup
+# B. Add vmrun to PATH
+echo 'export PATH="/Applications/VMware Fusion.app/Contents/Library:$PATH"' >> ~/.zshrc
+source ~/.zshrc
 
-# Test VM connection
-python -c "from desktop_env.providers.vmware import VMwareProvider; p = VMwareProvider(); print('VM ready:', p.is_vm_running())"
+# C. Verify vmrun works
+vmrun -T fusion list  # Should show: Total running VMs: 0
+
+# D. OSWorld VM will auto-download on first run (~38GB Ubuntu VM)
+# No manual setup needed - happens automatically when you run evaluation!
 ```
+
+**Troubleshooting**: If you get "vmrun: command not found", VMware Fusion is not installed or not in PATH. Follow steps A-C above.
 
 **What VMware does**:
 - Runs Ubuntu desktop environment
