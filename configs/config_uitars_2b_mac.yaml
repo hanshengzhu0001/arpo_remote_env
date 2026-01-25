@@ -94,7 +94,7 @@ trainer:
   logger: ["console", "wandb"]
   project_name: arpo-uitars-training
   experiment_name: uitars_2b_128tasks
-  wandb_entity: "hanszhu05-university-of-pennsylvania-org"
+  wandb_entity: "hanszhu05"
   n_gpus_per_node: 0  # CPU only
   nnodes: 1
   val_freq: 2  # Validate every 2 epochs

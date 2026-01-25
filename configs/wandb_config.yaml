@@ -2,7 +2,7 @@
 
 wandb:
   enabled: true
-  entity: "hanszhu05-university-of-pennsylvania-org"
+  entity: "hanszhu05"
   project: "arpo-uitars-training"
   name: "uitars-2b-128tasks-epoch1"  # Run name
   
