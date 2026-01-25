@@ -82,15 +82,15 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 1  # Single VMware VM for Mac
-  max_steps: 10  # Reduced from 15
+  num_envs: 4  # 4 VMware VMs (adjust based on RAM)
+  max_steps: 16  # Increased from 15
   screen_size: [1920, 1080]
   provider: vmware  # VMware Fusion for macOS
   os_type: Ubuntu
   headless: true
 
 trainer:
-  total_episodes: 10  # 10 epochs for full training
+  total_episodes: 1  # 1 epoch for initial testing
   logger: ["console", "wandb"]
   project_name: arpo-uitars-training
   experiment_name: uitars_2b_128tasks

@@ -19,6 +19,11 @@ wandb login
 
 When prompted, paste your API key from: https://wandb.ai/authorize
 
+**Or set environment variable**:
+```bash
+export WANDB_API_KEY="your-api-key-here"
+```
+
 ### 3. Configure Your Entity
 
 Edit `configs/wandb_config.yaml`:
