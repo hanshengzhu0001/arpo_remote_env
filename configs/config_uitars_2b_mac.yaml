@@ -2,8 +2,8 @@
 # Adapted from examples/config.yaml for Mac with VMware
 
 data:
-  train_files: evaluation_examples/train_subset8.json  # 8 tasks for Mac
-  val_files: evaluation_examples/train_subset8.json
+  train_files: test_data/osworld_examples/train_all_128.json  # 128 tasks
+  val_files: test_data/osworld_examples/train_all_128.json
   prompt_key: instruction
   answer_key: null
   image_key: images
