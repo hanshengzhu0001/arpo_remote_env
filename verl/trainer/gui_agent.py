@@ -1052,6 +1052,12 @@ class RemoteEnvWorker:
             }
         return data
 
+    # Longer timeouts for remote env (Mac/CPU or KVM); evaluate can be slow
+    REMOTE_RESET_TIMEOUT = 1200   # 20 min
+    REMOTE_STEP_TIMEOUT = 300     # 5 min
+    REMOTE_EVALUATE_TIMEOUT = 300  # 5 min
+    REMOTE_EVALUATE_RETRIES = 2
+
     def _post(self, path: str, json_body: dict, timeout=None):
         url = f"{self.remote_server_url}{path}"
         r = requests.post(url, json=json_body, timeout=timeout)
@@ -1069,7 +1075,7 @@ class RemoteEnvWorker:
         self.history_images = []
 
         try:
-            resp = self._post("/env/reset", {"task_config": task_config}, timeout=920)
+            resp = self._post("/env/reset", {"task_config": task_config}, timeout=self.REMOTE_RESET_TIMEOUT)
         except Exception as e:
             print(f"RemoteEnvWorker reset HTTP error: {e}")
             return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": 0.0}
@@ -1089,7 +1095,7 @@ class RemoteEnvWorker:
     def step(self, prediction):
         self._is_init = False
         try:
-            resp = self._post("/env/step", {"prediction": prediction}, timeout=120)
+            resp = self._post("/env/step", {"prediction": prediction}, timeout=self.REMOTE_STEP_TIMEOUT)
         except Exception as e:
             print(f"RemoteEnvWorker step HTTP error: {e}")
             return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": -1.0}
@@ -1107,12 +1113,17 @@ class RemoteEnvWorker:
         }
 
     def evaluate(self):
-        try:
-            score = self._post("/env/evaluate", {}, timeout=60)
-            return float(score)
-        except Exception as e:
-            print(f"RemoteEnvWorker evaluate HTTP error: {e}")
-            return 0.0
+        last_err = None
+        for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
+            try:
+                score = self._post("/env/evaluate", {}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
+                return float(score)
+            except Exception as e:
+                last_err = e
+                if attempt < self.REMOTE_EVALUATE_RETRIES:
+                    print(f"RemoteEnvWorker evaluate attempt {attempt + 1} failed: {e}, retrying...")
+        print(f"RemoteEnvWorker evaluate HTTP error: {last_err}")
+        return 0.0
 
     def get_history_messages(self):
         return self.history_messages

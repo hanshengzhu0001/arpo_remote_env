@@ -748,7 +748,10 @@ class RayPPOTrainer:
     def start_reset_envs(self, batch_dict):
         rollout_n = self.config.worker.rollout.n
 
-        task_configs = [x for x in batch_dict for _ in range(rollout_n)] # interleave
+        task_configs = [x for x in batch_dict for _ in range(rollout_n)]  # interleave
+        # With 1 remote env we may have more task_configs than env_workers; use only the first N
+        if len(task_configs) > len(self.env_workers):
+            task_configs = task_configs[: len(self.env_workers)]
         assert len(task_configs) == len(self.env_workers)
         reset_envs_object = [worker.reset.remote(task_config) for worker, task_config in zip(self.env_workers, task_configs)]
         return task_configs, reset_envs_object
@@ -759,6 +762,8 @@ class RayPPOTrainer:
 
         rollout_n = self.config.worker.rollout.n
         bsz = len(task_configs) // rollout_n
+        if bsz == 0:
+            return batch  # e.g. 1 remote env with 1 rollout, no replay grouping
 
         final_batch = []
         final_eval_results = []
