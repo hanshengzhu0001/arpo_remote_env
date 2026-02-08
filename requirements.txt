@@ -25,6 +25,13 @@ backoff
 # Web server (for inference servers)
 flask==3.0.0
 
+# Remote env server (Mac / CPU)
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+
+# Distributed / trainer (used by verl; needed for gui_agent imports on server)
+ray>=2.9.0
+
 # Utilities
 PyYAML==6.0.2
 lxml
