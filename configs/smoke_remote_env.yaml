@@ -85,7 +85,7 @@ worker:
 env:
   num_envs: 1  # One remote server = one env (smoke_4gpu uses 4)
   max_steps: 16
-  remote_server_url: "http://REPLACE_WITH_MAC_IP:5001"  # e.g. http://10.103.75.204:5001
+  remote_server_url: "http://10.103.75.204:5001"
 
 trainer:
   total_episodes: 1
