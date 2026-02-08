@@ -1,17 +1,18 @@
 # Smoke test with REMOTE env (Mac or AWS CPU). Cluster runs training; env runs on remote server.
-# 1) On Mac: cd hansenzuishuai && python scripts/remote_env_server.py
-# 2) Set env.remote_server_url to your Mac's URL (e.g. http://YOUR_MAC_IP:5000)
-# 3) Run training on cluster with this config; use num_envs: 1 (one server = one env).
+# Aligned with smoke_4gpu.yaml (4 GPUs) except: 1 remote env, rollout_batch_size 1.
+# 1) On Mac: python scripts/remote_env_server.py
+# 2) Set env.remote_server_url to your Mac's URL (e.g. http://YOUR_MAC_IP:5001)
+# 3) Run on cluster: python -m verl.trainer.main config=configs/smoke_remote_env.yaml
 
 data:
-  train_files: evaluation_examples/test_smoke_4.json
-  val_files: evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_smoke_4.json
+  val_files: OSWorld/evaluation_examples/test_smoke_4.json
   prompt_key: instruction
   answer_key: ""
   image_key: images
   max_prompt_length: 32768
   max_response_length: 4096
-  rollout_batch_size: 1  # Match num_envs when using remote
+  rollout_batch_size: 1  # 1 env on remote server (smoke_4gpu uses 4)
   val_batch_size: -1
   shuffle: true
   seed: 1
@@ -27,8 +28,8 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 1
-    micro_batch_size_per_device_for_update: 1
+    global_batch_size: 4  # Match smoke_4gpu; must be >= n_gpus_per_node for FSDP
+    micro_batch_size_per_device_for_update: 1   # smoke_4gpu uses 2 but per_device=1 here
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
     padding_free: false
@@ -58,7 +59,7 @@ worker:
 
   rollout:
     temperature: 0.7
-    n: 2
+    n: 2  # GRPO requires n > 1
     gpu_memory_utilization: 0.11
     enforce_eager: false
     enable_chunked_prefill: false
@@ -82,9 +83,9 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 1  # One remote server = one env
+  num_envs: 1  # One remote server = one env (smoke_4gpu uses 4)
   max_steps: 16
-  remote_server_url: "http://REPLACE_WITH_MAC_IP:5000"  # e.g. http://192.168.1.100:5000
+  remote_server_url: "http://REPLACE_WITH_MAC_IP:5001"  # e.g. http://10.103.75.204:5001
 
 trainer:
   total_episodes: 1

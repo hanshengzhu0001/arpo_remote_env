@@ -97,7 +97,11 @@ def main():
     ppo_config = OmegaConf.to_object(ppo_config)
 
     if not ray.is_initialized():
-        # this is for local ray cluster
+        # Start a fresh local Ray cluster (avoid connecting to an existing one with a different Ray/Python version)
+        import os
+        for key in list(os.environ):
+            if key.startswith("RAY_"):
+                os.environ.pop(key, None)
         ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
     
     print(ray.cluster_resources().keys())

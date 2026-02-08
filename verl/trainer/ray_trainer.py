@@ -252,8 +252,11 @@ class RayPPOTrainer:
         if config.algorithm.adv_estimator not in list(AdvantageEstimator):
             raise NotImplementedError(f"Unknown advantage estimator: {config.algorithm.adv_estimator}.")
 
-        if config.data.rollout_batch_size % config.worker.actor.global_batch_size != 0:
+        use_remote_env = bool(getattr(config.env, "remote_server_url", None))
+        if not use_remote_env and config.data.rollout_batch_size % config.worker.actor.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by actor global batch size.")
+        if use_remote_env and config.data.rollout_batch_size > config.worker.actor.global_batch_size:
+            raise ValueError("With remote env, rollout batch size should be <= actor global batch size (e.g. 1 <= 4).")
 
         if (
             config.data.rollout_batch_size * config.worker.rollout.n
@@ -263,7 +266,7 @@ class RayPPOTrainer:
             )
 
         if self.use_critic:
-            if config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
+            if not use_remote_env and config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
                 raise ValueError("Rollout batch size must be divisible by critic global batch size.")
 
             if (
@@ -369,10 +372,12 @@ class RayPPOTrainer:
         self.val_dataset = OSWorldTaskConfigDataset(
             data_path=self.config.data.val_files,
         )
-        
+        # Val batch size = number of envs (env_workers not created yet; use config)
+        num_envs = 1 if getattr(self.config.env, "remote_server_url", None) else self.config.env.num_envs
+        val_batch_size = min(num_envs, len(self.val_dataset))
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
-            batch_size=min(len(self.env_workers), len(self.val_dataset)),
+            batch_size=val_batch_size,
             shuffle=False,
             num_workers=8,
             collate_fn=collate_fn,
@@ -494,8 +499,13 @@ class RayPPOTrainer:
             sample_inputs.extend([task_config['instruction'] for task_config in task_configs])
             prompts = []
             for history_message in history_messages:
-                prompts.append(self.processor.apply_chat_template(history_message))
-            
+                if not history_message or (isinstance(history_message, list) and len(history_message) == 0):
+                    prompts.append("")  # Remote env timeout/failure or no steps
+                else:
+                    try:
+                        prompts.append(self.processor.apply_chat_template(history_message))
+                    except (IndexError, KeyError, TypeError):
+                        prompts.append("")  # Malformed history (e.g. after timeout)
             sample_outputs.extend(prompts)
             sample_labels.extend(['none']*len(prompts))
             sample_scores.extend(scores)
