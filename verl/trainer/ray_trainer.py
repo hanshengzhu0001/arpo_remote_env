@@ -54,7 +54,7 @@ from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
 
-from .gui_agent import EnvWorker
+from .gui_agent import EnvWorker, RemoteEnvWorker
 from .replay_buffer import ReplayBuffer
 
 from collections import defaultdict
@@ -301,26 +301,36 @@ class RayPPOTrainer:
         print('Start to create env_worker for OSWorld Environment')
         max_steps = self.config.env.max_steps
         num_envs = self.config.env.num_envs
+        remote_url = getattr(self.config.env, 'remote_server_url', None) or None
 
-        # 1) 从 cluster_resources 里挑出自定义的 IP 资源标签
-        #    cluster_resources() 里还会有 "CPU"/"GPU"/"memory" 等内置资源，我们要过滤掉
-        all_res = ray.cluster_resources().keys()
-        # ip_labels = [r for r in all_res if re.match(r"^\d+\.\d+\.\d+\.\d+$", r)]
-        ip_labels = [r for r in all_res if re.match(r"^docker:\d+\.\d+\.\d+\.\d+$", r)]
-        if not ip_labels:
-            raise RuntimeError("没找到任何 IP 资源标签，请检查 ray start 时 --resources 参数")
+        if remote_url:
+            # Remote env (Mac/AWS): one server = one env for now; use a single worker.
+            num_remote = 1
+            if num_envs != 1:
+                print(f'Remote env: using 1 worker (server has one env); config had num_envs={num_envs}')
+            self.env_workers = []
+            for i in range(num_remote):
+                w = RemoteEnvWorker.options(name=f"remote_env_worker_{i}").remote(
+                    i, max_steps, self.config, remote_url
+                )
+                self.env_workers.append(w)
+            print(f'RemoteEnvWorker created (url={remote_url}), total: {len(self.env_workers)}')
+        else:
+            # Local Docker env workers pinned to nodes with docker resource
+            all_res = ray.cluster_resources().keys()
+            ip_labels = [r for r in all_res if re.match(r"^docker:\d+\.\d+\.\d+\.\d+$", r)]
+            if not ip_labels:
+                raise RuntimeError("没找到任何 IP 资源标签，请检查 ray start 时 --resources 参数")
 
-        # 2) 按 round-robin 方式，把每个 env worker pin 到不同节点
-        self.env_workers = []
-        for i in range(num_envs):
-            ip_label = ip_labels[i % len(ip_labels)]
-            w = EnvWorker.options(
-                    resources={ ip_label: 1 },   # 保证这个 actor 一定被调度到拥有 ip_label 资源的节点
+            self.env_workers = []
+            for i in range(num_envs):
+                ip_label = ip_labels[i % len(ip_labels)]
+                w = EnvWorker.options(
+                    resources={ip_label: 1},
                     name=f"env_worker_{i}"
                 ).remote(i, max_steps, self.config)
-            self.env_workers.append(w)
-
-        print(f'Env_worker for OSWorld Environment created!  total: {len(self.env_workers)}')
+                self.env_workers.append(w)
+            print(f'Env_worker for OSWorld Environment created!  total: {len(self.env_workers)}')
 
         # 3) 数据预处理器，放在 driver 或随意放一个节点上都行
         self.data_processor_workers = [
@@ -362,7 +372,7 @@ class RayPPOTrainer:
         
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
-            batch_size=min(self.config.env.num_envs, len(self.val_dataset)), # use the same number as envs
+            batch_size=min(len(self.env_workers), len(self.val_dataset)),
             shuffle=False,
             num_workers=8,
             collate_fn=collate_fn,
@@ -415,7 +425,7 @@ class RayPPOTrainer:
         for batch_dict in self.val_dataloader:
             task_configs = batch_dict
             num_tasks = len(task_configs)
-            assert num_tasks <= self.config.env.num_envs
+            assert num_tasks <= len(self.env_workers)
             task_configs_total.extend(task_configs) # record task
 
             futures = [
@@ -433,6 +443,17 @@ class RayPPOTrainer:
                 num_workers = len(self.env_workers)
 
                 vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
+
+                if vllm_batch is None:
+                    # No envs produced valid observations (e.g. all failed to start). Skip this batch.
+                    eval_results_total.extend([{"success": False, "reward": 0.0}] * num_tasks)
+                    reward_tensor_lst.append(torch.zeros(num_tasks, 1, dtype=torch.float32))
+                    sample_inputs.extend([tc.get("instruction", "") for tc in task_configs])
+                    sample_outputs.extend([""] * num_tasks)
+                    sample_labels.extend(["none"] * num_tasks)
+                    sample_scores.extend([0.0] * num_tasks)
+                    self.actor_rollout_wg.finish_generate_sequences()
+                    continue
 
                 vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, num_workers)
                 
@@ -635,6 +656,9 @@ class RayPPOTrainer:
 
         valid_obs_messages = [x['obs_messages'] for x in env_outputs if x['obs_messages'] is not None]
         valid_env_idx = [x['env_idx'] for x in env_outputs if x['obs_messages'] is not None]
+
+        if not valid_obs_messages:
+            return None, []
 
         dataset = OSWorldDataset(
             valid_obs_messages,

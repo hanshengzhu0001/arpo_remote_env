@@ -914,3 +914,214 @@ class EnvWorker():
 
     def is_init(self):
         return self.is_init
+
+
+# --- Remote env worker: same interface as EnvWorker but talks to HTTP server (Mac/AWS) ---
+import requests
+from .remote_env_protocol import wire_to_messages
+
+
+@ray.remote(num_cpus=1)
+class RemoteEnvWorker:
+    """Env worker that forwards reset/step/evaluate to a remote HTTP server (one env on Mac/AWS)."""
+    system_prompt = uitars_system_prompt
+
+    def __init__(self, worker_idx, max_steps, config, remote_server_url: str):
+        self.worker_idx = worker_idx
+        self.max_steps = max_steps
+        self.config = config
+        self.remote_server_url = remote_server_url.rstrip("/")
+        self.step_counter = 0
+        self._is_done = False
+        self._is_init = False
+        self.instruction = None
+        self.task_config = None
+        self.history_messages = []
+        self.history_images = []
+
+        self.tokenizer = get_tokenizer(
+            config.worker.actor.model.model_path,
+            trust_remote_code=config.worker.actor.model.trust_remote_code,
+            use_fast=True,
+        )
+        self.processor = get_processor(
+            config.worker.actor.model.model_path,
+            trust_remote_code=config.worker.actor.model.trust_remote_code,
+            use_fast=True,
+        )
+        self.action_parse_res_factor = 1000
+        self.model_type = "qwen25vl"
+        self.max_pixels = 16384 * 28 * 28
+        self.min_pixels = 100 * 28 * 28
+        self.reset_train_tensors()
+
+    def reset_train_tensors(self):
+        self.input_ids = torch.zeros((0,), dtype=torch.int64)
+        self.labels = torch.full((0,), -100, dtype=torch.int64)
+        self.attention_mask = torch.zeros((0,), dtype=torch.int64)
+        self.pixel_values = None
+        self.image_grid_thw = None
+
+    def load_content(self, content):
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join([self.load_content(c) for c in content])
+        if isinstance(content, dict):
+            if "text" in content:
+                return content["text"]
+            if "image" in content:
+                return "<|vision_start|><|image_pad|><|vision_end|>"
+        raise ValueError(f"Unknown content type: {content}")
+
+    def process_message(self, message):
+        tokenizer = self.tokenizer
+        processor = self.processor
+        image_inputs, video_inputs, video_kwargs = process_vision_info(message, return_video_kwargs=True)
+        input_ids, labels, attention_mask = [], [], []
+        image_count = 0
+        pixel_values, image_grid_thw = [], []
+        for msg in message:
+            role = msg["role"]
+            content = self.load_content(msg["content"])
+            prompt = f"<|im_start|>{role}\n" + content + "<|im_end|>\n"
+            cur_image_num = prompt.count("<|image_pad|>")
+            if cur_image_num > 0:
+                result = processor(
+                    image_inputs[image_count : image_count + cur_image_num],
+                    [prompt],
+                    add_special_tokens=False,
+                    return_tensors="pt",
+                )
+                image_count += cur_image_num
+            else:
+                result = processor(None, [prompt], add_special_tokens=False, return_tensors="pt")
+            cur_input_ids = result.pop("input_ids")[0]
+            cur_attention_mask = result.pop("attention_mask")[0]
+            if "pixel_values" in result:
+                pixel_values.append(result["pixel_values"])
+            if "image_grid_thw" in result:
+                image_grid_thw.append(result["image_grid_thw"])
+            input_ids.append(cur_input_ids)
+            attention_mask.append(cur_attention_mask)
+            labels.append(torch.full_like(cur_input_ids, -100) if role in ("system", "user") else cur_input_ids)
+        input_ids = torch.cat(input_ids, dim=0)
+        labels = torch.cat(labels, dim=0)
+        attention_mask = torch.cat(attention_mask, dim=0)
+        self.input_ids = torch.cat([self.input_ids, input_ids], dim=0)
+        self.labels = torch.cat([self.labels, labels], dim=0)
+        self.attention_mask = torch.cat([self.attention_mask, attention_mask], dim=0)
+        pv = torch.cat(pixel_values, dim=0) if pixel_values else None
+        igt = torch.cat(image_grid_thw, dim=0) if image_grid_thw else None
+        if self.pixel_values is None:
+            self.pixel_values = pv
+        elif pv is not None:
+            self.pixel_values = torch.cat([self.pixel_values, pv], dim=0)
+        if self.image_grid_thw is None:
+            self.image_grid_thw = igt
+        elif igt is not None:
+            self.image_grid_thw = torch.cat([self.image_grid_thw, igt], dim=0)
+
+    def get_train_dict(self):
+        position_ids = get_rope_index(
+            self.processor,
+            input_ids=self.input_ids,
+            image_grid_thw=self.image_grid_thw,
+            attention_mask=self.attention_mask,
+        )
+        input_ids, attention_mask, position_ids, labels = VF.postprocess_data(
+            input_ids=self.input_ids,
+            attention_mask=self.attention_mask,
+            position_ids=position_ids,
+            max_length=self.config.data.max_prompt_length,
+            pad_token_id=self.tokenizer.pad_token_id,
+            left_pad=True,
+            truncation="right",
+            labels=self.labels,
+        )
+        data = {
+            "input_ids": input_ids,
+            "labels": labels,
+            "position_ids": position_ids,
+            "attention_mask": attention_mask,
+        }
+        if self.pixel_values is not None:
+            data["multi_modal_inputs"] = {
+                "pixel_values": self.pixel_values,
+                "image_grid_thw": self.image_grid_thw,
+            }
+        return data
+
+    def _post(self, path: str, json_body: dict, timeout=None):
+        url = f"{self.remote_server_url}{path}"
+        r = requests.post(url, json=json_body, timeout=timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def reset(self, task_config):
+        self.instruction = task_config.get("instruction")
+        self.task_config = task_config
+        self.step_counter = 0
+        self._is_done = False
+        self._is_init = True
+        self.reset_train_tensors()
+        self.history_messages = []
+        self.history_images = []
+
+        try:
+            resp = self._post("/env/reset", {"task_config": task_config}, timeout=920)
+        except Exception as e:
+            print(f"RemoteEnvWorker reset HTTP error: {e}")
+            return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": 0.0}
+
+        self._is_done = resp.get("is_done", True)
+        obs_wire = resp.get("obs_messages")
+        if obs_wire:
+            self.history_messages = wire_to_messages(obs_wire)
+            self.process_message(self.history_messages)
+        return {
+            "env_idx": self.worker_idx,
+            "obs_messages": self.history_messages if obs_wire else None,
+            "is_done": self._is_done,
+            "format_reward": resp.get("format_reward", 0.0),
+        }
+
+    def step(self, prediction):
+        self._is_init = False
+        try:
+            resp = self._post("/env/step", {"prediction": prediction}, timeout=120)
+        except Exception as e:
+            print(f"RemoteEnvWorker step HTTP error: {e}")
+            return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": -1.0}
+
+        self._is_done = resp.get("is_done", True)
+        obs_wire = resp.get("obs_messages")
+        if obs_wire:
+            self.history_messages = wire_to_messages(obs_wire)
+            self.process_message(self.history_messages[-2:])
+        return {
+            "env_idx": self.worker_idx,
+            "obs_messages": self.history_messages if obs_wire else None,
+            "is_done": self._is_done,
+            "format_reward": resp.get("format_reward", 0.0),
+        }
+
+    def evaluate(self):
+        try:
+            score = self._post("/env/evaluate", {}, timeout=60)
+            return float(score)
+        except Exception as e:
+            print(f"RemoteEnvWorker evaluate HTTP error: {e}")
+            return 0.0
+
+    def get_history_messages(self):
+        return self.history_messages
+
+    def get_history_images(self):
+        return self.history_images
+
+    def is_done(self):
+        return self._is_done
+
+    def is_init(self):
+        return self._is_init

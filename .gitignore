@@ -22,7 +22,11 @@ OSWorld/vmware_vm_data/
 OSWorld/docker_vm_data/
 OSWorld/cache/
 vmware_vm_data/
+docker_vm_data/
 cache_dirs/
+*.qcow2
+*.qcow2.zip
+Ubuntu.qcow2*
 *.vmdk
 *.vmem
 *.vmx
@@ -36,6 +40,7 @@ results*/
 checkpoints*/
 logs/
 *.log
+wandb/
 
 # OS files
 .DS_Store

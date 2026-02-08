@@ -1,0 +1,95 @@
+# Smoke test with REMOTE env (Mac or AWS CPU). Cluster runs training; env runs on remote server.
+# 1) On Mac: cd hansenzuishuai && python scripts/remote_env_server.py
+# 2) Set env.remote_server_url to your Mac's URL (e.g. http://YOUR_MAC_IP:5000)
+# 3) Run training on cluster with this config; use num_envs: 1 (one server = one env).
+
+data:
+  train_files: evaluation_examples/test_smoke_4.json
+  val_files: evaluation_examples/test_smoke_4.json
+  prompt_key: instruction
+  answer_key: ""
+  image_key: images
+  max_prompt_length: 32768
+  max_response_length: 4096
+  rollout_batch_size: 1  # Match num_envs when using remote
+  val_batch_size: -1
+  shuffle: true
+  seed: 1
+  max_pixels: 2116800
+  min_pixels: 2800
+
+algorithm:
+  adv_estimator: grpo
+  disable_kl: true
+  use_kl_loss: false
+  kl_coef: 0
+  enable_replay: true
+
+worker:
+  actor:
+    global_batch_size: 1
+    micro_batch_size_per_device_for_update: 1
+    micro_batch_size_per_device_for_experience: 1
+    max_grad_norm: 1.0
+    padding_free: false
+    ulysses_sequence_parallel_size: 1
+    ppo_epochs: 1
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.3
+    model:
+      model_path: ByteDance-Seed/UI-TARS-2B-SFT
+      enable_gradient_checkpointing: true
+      trust_remote_code: true
+      freeze_vision_tower: false
+      override_config:
+        _attn_implementation: "eager"
+    optim:
+      lr: 1.0e-6
+      weight_decay: 1.0e-2
+      strategy: adamw
+      lr_warmup_ratio: 0.05
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: false
+      enable_rank0_init: true
+    offload:
+      offload_params: false
+      offload_optimizer: false
+
+  rollout:
+    temperature: 0.7
+    n: 2
+    gpu_memory_utilization: 0.11
+    enforce_eager: false
+    enable_chunked_prefill: false
+    tensor_parallel_size: 1
+    limit_images: 10
+    max_num_batched_tokens: 40960
+    val_override_config:
+      temperature: 0.5
+      n: 1
+
+  ref:
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: false
+    offload:
+      offload_params: false
+
+  reward:
+    reward_type: function
+    score_function: math
+    skip_special_tokens: true
+
+env:
+  num_envs: 1  # One remote server = one env
+  max_steps: 16
+  remote_server_url: "http://REPLACE_WITH_MAC_IP:5000"  # e.g. http://192.168.1.100:5000
+
+trainer:
+  total_episodes: 1
+  logger: ["console", "wandb"]
+  project_name: arpo-smoke-test
+  experiment_name: uitars_2b_remote_env
+  n_gpus_per_node: 4
+  nnodes: 1
