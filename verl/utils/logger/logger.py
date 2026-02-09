@@ -93,7 +93,10 @@ class WandbLogger(Logger):
         wandb.log(data=data, step=step)
 
     def finish(self) -> None:
-        wandb.finish()
+        try:
+            wandb.finish()
+        except (BrokenPipeError, OSError):
+            pass  # Process may be exiting; avoid noisy atexit traceback
 
 
 class SwanlabLogger(Logger):
@@ -149,6 +152,9 @@ class Tracker:
     def log_generation(self, samples: List[Tuple[str, str, str, float]], step: int) -> None:
         self.gen_logger.log(samples, step)
 
-    def __del__(self):
+    def finish(self) -> None:
         for logger in self.loggers:
             logger.finish()
+
+    def __del__(self):
+        self.finish()

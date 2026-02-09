@@ -1151,3 +1151,5 @@ class RayPPOTrainer:
 
         if self.config.trainer.save_freq <= 0 or self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()
+
+        self.logger.finish()
