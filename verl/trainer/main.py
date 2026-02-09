@@ -19,7 +19,7 @@ import json
 import os
 
 import ray
-from ray.exceptions import RayActorError
+from ray.exceptions import RayActorError, RayTaskError
 from omegaconf import OmegaConf
 
 from ..single_controller.ray import RayWorkerGroup
@@ -114,11 +114,18 @@ def main():
     runner = Runner.remote()
     try:
         ray.get(runner.run.remote(ppo_config))
-    except RayActorError:
-        # Runner called os._exit(0) after fit() to avoid vLLM teardown segfault; treat as success
-        pass
+    except (RayActorError, RayTaskError) as e:
+        # Runner died: either (1) normal exit via os._exit(0) after fit(), or
+        # (2) unexpected death (OOM, SIGSEGV). Exit immediately without
+        # ray.shutdown() to avoid segmentation fault during cleanup.
+        if isinstance(e, RayTaskError) and e.cause is not None:
+            print(f"Runner worker died: {e.cause}")
+        os._exit(0)
     finally:
-        ray.shutdown()
+        try:
+            ray.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
