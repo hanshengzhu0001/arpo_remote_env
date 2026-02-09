@@ -10,9 +10,9 @@ data:
   prompt_key: instruction
   answer_key: ""
   image_key: images
-  # Shorter context/response lengths for remote smoke tests to avoid CUDA OOM
-  max_prompt_length: 8192
-  max_response_length: 2048
+  # Very short context/response lengths for remote smoke tests to minimize CUDA OOM
+  max_prompt_length: 4096
+  max_response_length: 1024
   rollout_batch_size: 1  # 1 env on remote server (smoke_4gpu uses 4)
   val_batch_size: -1
   shuffle: true
@@ -56,8 +56,8 @@ worker:
       # Disable rank0 init to reduce peak GPU memory during FSDP model initialization
       enable_rank0_init: false
     offload:
-      offload_params: false
-      # Enable optimizer CPU offload to reduce GPU memory pressure during init
+      # Enable CPU offload for both params and optimizer to minimize GPU memory during init
+      offload_params: true
       offload_optimizer: true
 
   rollout:
@@ -69,7 +69,8 @@ worker:
     enable_chunked_prefill: false
     tensor_parallel_size: 1
     limit_images: 10
-    max_num_batched_tokens: 40960
+    # Reduce batched tokens to lower memory usage during init
+    max_num_batched_tokens: 20480
     val_override_config:
       temperature: 0.5
       n: 1
