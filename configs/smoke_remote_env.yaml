@@ -20,11 +20,11 @@ data:
   min_pixels: 2800
 
 algorithm:
-  adv_estimator: grpo
-  disable_kl: true
+  adv_estimator: grpo   # ARPO: group-relative advantage (needs rollout.n > 1 and multiple samples per task)
+  disable_kl: true     # ARPO: no KL penalty
   use_kl_loss: false
-  kl_coef: 0
-  enable_replay: true
+  kl_coef: 0           # ARPO: must be 0 when disable_kl
+  enable_replay: true  # ARPO: experience replay
 
 worker:
   actor:

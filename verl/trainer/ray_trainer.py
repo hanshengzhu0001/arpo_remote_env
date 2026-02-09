@@ -1011,7 +1011,8 @@ class RayPPOTrainer:
                         print('Global eval_results: ', sum(reward_tensor.tolist())/len(batch))
                     
 
-                    # When batch size < world_size, skip PPO update to avoid OOM/crash (single-worker VL forward is too heavy).
+                    # ARPO = GRPO advantage + no KL (disable_kl) + experience replay. GRPO needs rollout.n>1 samples per task.
+                    # When batch size < world_size (e.g. 1 remote env), skip PPO to avoid OOM; GRPO is not applied this step.
                     num_dp_workers = self.actor_rollout_wg.world_size
                     use_single_worker = len(batch) < num_dp_workers
                     if use_single_worker:
