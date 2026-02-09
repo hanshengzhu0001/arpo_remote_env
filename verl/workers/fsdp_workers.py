@@ -210,12 +210,15 @@ class FSDPWorker(Worker):
                 # Best-effort: if the API changes, we just skip patching and fall back to default behavior.
                 pass
 
+            # When enable_rank0_init=False, load onto CPU first to avoid OOM during checkpoint loading.
+            # FSDP will handle moving to CUDA and sharding after the model is loaded.
+            # When enable_rank0_init=True, rank 0 loads full model on CPU, then FSDP shards it.
             model = auto_class.from_pretrained(
                 model_config.model_path,
                 config=self.model_config,
                 torch_dtype=torch_dtype,
                 attn_implementation="eager",  # Use eager instead of flash_attention_2
-                device_map="cpu" if fsdp_config.enable_rank0_init else "cuda",
+                device_map="cpu",  # Always load to CPU; FSDP will move to CUDA and shard
                 low_cpu_mem_usage=True,
                 trust_remote_code=model_config.trust_remote_code,
             )
