@@ -20,13 +20,17 @@ for p in (repo_root, osworld_root):
         sys.path.insert(0, str(p))
 
 import base64
+import logging
 import os
 import socket
 import traceback
+from contextlib import asynccontextmanager
 from io import BytesIO
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+logger = logging.getLogger("uvicorn.error")
 
 try:
     import docker
@@ -56,12 +60,12 @@ def _patch_docker_provider_ports() -> None:
     try:
         from desktop_env.providers.docker.provider import DockerProvider  # type: ignore
     except Exception as e:
-        print(f"Docker provider patch SKIPPED (import failed): {e}. Port allocation may fail on macOS (psutil.AccessDenied).", flush=True)
+        logger.warning("Docker provider patch SKIPPED (import failed): %s. Port allocation may fail on macOS (psutil.AccessDenied).", e)
         return
 
     if getattr(DockerProvider, "_ARPO_PORT_PATCHED", False):
         return
-    print("Patching Docker provider for macOS: using socket bind + Docker ports (no psutil)...", flush=True)
+    logger.info("Patching Docker provider for macOS: using socket bind + Docker ports (no psutil)...")
 
     def _get_docker_used_ports(self) -> set[int]:
         docker_ports: set[int] = set()
@@ -97,7 +101,7 @@ def _patch_docker_provider_ports() -> None:
 
     DockerProvider._get_available_port = _get_available_port  # type: ignore[attr-defined]
     DockerProvider._ARPO_PORT_PATCHED = True  # type: ignore[attr-defined]
-    print("Docker provider patched successfully (no psutil).", flush=True)
+    logger.info("Docker provider patched successfully (no psutil).")
 
 # --- Server state: one env ---
 env: DesktopEnv | None = None
@@ -109,7 +113,15 @@ max_steps = 16
 instruction: str | None = None
 OBSERVATION_TYPE = "screenshot"  # same as run_uitars --observation_type screenshot
 
-app = FastAPI(title="OSWorld Remote Env", version="0.1.0")
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # Run Docker provider patch during startup so it appears in uvicorn logs
+    if os.environ.get("PROVIDER", "docker").strip().lower() == "docker":
+        _patch_docker_provider_ports()
+    yield
+
+
+app = FastAPI(title="OSWorld Remote Env", version="0.1.0", lifespan=_lifespan)
 
 
 class ResetRequest(BaseModel):
@@ -387,10 +399,6 @@ def health():
         "message": "KVM hardware acceleration enabled" if kvm_available else "KVM not available, using software emulation"
     }
 
-
-# Patch Docker provider at startup when using docker (avoids psutil.AccessDenied on macOS before first /env/reset)
-if os.environ.get("PROVIDER", "docker").strip().lower() == "docker":
-    _patch_docker_provider_ports()
 
 if __name__ == "__main__":
     import uvicorn
