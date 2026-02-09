@@ -10,18 +10,18 @@ cd /path/to/hansenzuishuai
 python scripts/remote_env_server.py
 ```
 
-Server listens on `0.0.0.0:5001`. Keep this terminal open.
+Server listens on `0.0.0.0:15001`. Keep this terminal open.
 
 ## 2. On cluster (training)
 
 **Option A – Cluster can reach your Mac (same VPN/network)**  
-- Set `env.remote_server_url` in `configs/smoke_remote_env.yaml` to your Mac IP, e.g. `http://10.103.75.204:5001`.
-- From cluster: `curl http://YOUR_MAC_IP:5001/health` then run `python -m verl.trainer.main config=configs/smoke_remote_env.yaml`
+- Set `env.remote_server_url` in `configs/smoke_remote_env.yaml` to your Mac IP, e.g. `http://10.103.75.204:15001`.
+- From cluster: `curl http://YOUR_MAC_IP:15001/health` then run `python -m verl.trainer.main config=configs/smoke_remote_env.yaml`
 
 **Option B – Cluster cannot reach your Mac (SSH reverse tunnel)**  
-1. On your Mac (env server already running): `ssh -R 5001:localhost:5001 kevinzyz@<CLUSTER_IP_or_HOSTNAME>` — leave this SSH session open.  
-2. On cluster: `curl http://127.0.0.1:5001/health` then `python -m verl.trainer.main config=configs/smoke_remote_env_tunnel.yaml`  
-The tunnel uses outbound SSH from the Mac; the cluster connects to `127.0.0.1:5001` on the cluster node.
+1. On your Mac (env server already running): `ssh -R 15001:localhost:15001 kevinzyz@<CLUSTER_IP_or_HOSTNAME>` — leave this SSH session open.  
+2. On cluster: `curl http://127.0.0.1:15001/health` then `python -m verl.trainer.main config=configs/smoke_remote_env_tunnel.yaml`  
+The tunnel uses outbound SSH from the Mac; the cluster connects to `127.0.0.1:15001` on the cluster node.
 
 ## API (for debugging)
 

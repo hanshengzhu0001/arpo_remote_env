@@ -4,11 +4,11 @@
 # Setup:
 #   1. On Mac: start env server:  python scripts/remote_env_server.py
 #   2. On Mac: open tunnel to cluster (keeps running):
-#        ssh -R 5001:localhost:5001 kevinzyz@<CLUSTER_IP_or_HOSTNAME>
+#        ssh -R 15001:localhost:15001 kevinzyz@<CLUSTER_IP_or_HOSTNAME>
 #   3. On cluster: run this config:
 #        python -m verl.trainer.main config=configs/smoke_remote_env_tunnel.yaml
 #
-# The tunnel forwards cluster's localhost:5001 -> Mac's localhost:5001.
+# The tunnel forwards cluster's localhost:15001 -> Mac's localhost:15001.
 
 data:
   train_files: OSWorld/evaluation_examples/test_smoke_4.json
@@ -91,7 +91,7 @@ worker:
 env:
   num_envs: 1
   max_steps: 16
-  remote_server_url: "http://127.0.0.1:5001"  # SSH tunnel forwards cluster localhost -> Mac
+  remote_server_url: "http://127.0.0.1:15001"  # SSH tunnel forwards cluster localhost -> Mac
 
 trainer:
   total_episodes: 1

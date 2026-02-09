@@ -40,15 +40,15 @@ pip install -r requirements.txt   # skip GPU-only packages if needed
 python scripts/remote_env_server.py
 ```
 
-Leave that running (server on port **5001**).
+Leave that running (server on port **15001**).
 
 **On the cluster:**
 
-- If the cluster **can** reach your Mac (same VPN/network): set `env.remote_server_url` in `configs/smoke_remote_env.yaml` to `http://YOUR_MAC_IP:5001`, then:
+- If the cluster **can** reach your Mac (same VPN/network): set `env.remote_server_url` in `configs/smoke_remote_env.yaml` to `http://YOUR_MAC_IP:15001`, then:
   ```bash
   python -m verl.trainer.main config=configs/smoke_remote_env.yaml
   ```
-- If the cluster **cannot** reach your Mac: use an SSH reverse tunnel. On the Mac (with the env server already running): `ssh -R 5001:localhost:5001 USER@CLUSTER_HOST`. On the cluster: `curl http://127.0.0.1:5001/health` then:
+- If the cluster **cannot** reach your Mac: use an SSH reverse tunnel. On the Mac (with the env server already running): `ssh -R 15001:localhost:15001 USER@CLUSTER_HOST`. On the cluster: `curl http://127.0.0.1:15001/health` then:
   ```bash
   python -m verl.trainer.main config=configs/smoke_remote_env_tunnel.yaml
   ```
@@ -65,7 +65,7 @@ Full details: [scripts/README_remote_env_server.md](scripts/README_remote_env_se
 | `configs/smoke_4gpu.yaml` | 4 GPUs, 4 envs, ~25–30 min |
 | `configs/smoke_8gpu.yaml` | 8 GPUs, 8 envs |
 | `configs/smoke_remote_env.yaml` | Remote env (Mac IP in config) |
-| `configs/smoke_remote_env_tunnel.yaml` | Remote env via SSH tunnel (127.0.0.1:5001) |
+| `configs/smoke_remote_env_tunnel.yaml` | Remote env via SSH tunnel (127.0.0.1:15001) |
 
 Data paths use `OSWorld/evaluation_examples/test_smoke_4.json` (4 tasks). Set `env.remote_server_url` to your Mac’s URL when using remote env without tunnel.
 
