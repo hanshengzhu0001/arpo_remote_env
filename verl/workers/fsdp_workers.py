@@ -255,14 +255,12 @@ class FSDPWorker(Worker):
             else:
                 self.print_rank0("No vision tower found.")
 
-        # Clear CUDA cache before barrier. Don't call synchronize() as it can surface
-        # pending CUDA OOM errors from earlier operations. The barrier itself will
-        # synchronize distributed processes without needing explicit CUDA sync.
-        if torch.cuda.is_available():
-            print_gpu_memory_usage("BEFORE empty_cache and barrier", per_rank=True)
-            torch.cuda.empty_cache()
-            print_gpu_memory_usage("AFTER empty_cache, BEFORE barrier", per_rank=True)
+        # Sync all ranks after loading model to CPU (no CUDA work immediately before
+        # barrier to avoid extra allocations; ref/actor_rollout use same GPUs so ref
+        # should use enable_cpu_offload in smoke configs to leave headroom).
         dist.barrier()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         print_model_size(model)
         print_gpu_memory_usage("After huggingface model init and barrier", per_rank=True)
         mixed_precision = MixedPrecision(

@@ -86,9 +86,10 @@ worker:
   ref:
     fsdp:
       enable_full_shard: true
-      enable_cpu_offload: false
+      # Keep ref on CPU to free GPU for actor_rollout (avoids OOM at barrier during init)
+      enable_cpu_offload: true
     offload:
-      offload_params: false
+      offload_params: true
 
   reward:
     reward_type: function
