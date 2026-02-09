@@ -73,7 +73,7 @@ worker:
     temperature: 0.7
     n: 2
     # Increase GPU memory utilization for vLLM KV cache (was 0.05, too low after FSDP init)
-    gpu_memory_utilization: 0.15
+    gpu_memory_utilization: 0.08
     # Enable eager mode to disable torch.compile and reduce memory usage
     enforce_eager: true
     enable_chunked_prefill: false
