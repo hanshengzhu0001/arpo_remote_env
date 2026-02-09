@@ -348,6 +348,11 @@ class FSDPWorker(Worker):
         assert self.world_size % tp_size == 0, (
             f"rollout world size: {self.world_size} is not divisible by tp size: {tp_size}"
         )
+        print_gpu_memory_usage("BEFORE vLLM rollout init", per_rank=True)
+        # Clear CUDA cache before vLLM init to free memory for KV cache allocation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print_gpu_memory_usage("AFTER empty_cache, BEFORE vLLM init", per_rank=True)
         rollout_device_mesh = init_device_mesh("cuda", mesh_shape=(dp_size, tp_size), mesh_dim_names=("dp", "tp"))
         self.rollout = vLLMRollout(
             model_path=self.config.actor.model.model_path,
