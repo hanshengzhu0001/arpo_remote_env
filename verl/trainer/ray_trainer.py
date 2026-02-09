@@ -1012,15 +1012,18 @@ class RayPPOTrainer:
                         print('Global eval_results: ', sum(reward_tensor.tolist())/len(batch))
                     
 
-                    # recompute old_log_probs (single-worker path when batch smaller than world_size to avoid OOM from padding)
+                    # When batch size < world_size, skip PPO update to avoid OOM/crash (single-worker VL forward is too heavy).
                     num_dp_workers = self.actor_rollout_wg.world_size
                     use_single_worker = len(batch) < num_dp_workers
+                    if use_single_worker:
+                        print(
+                            f"Skipping PPO update this step (batch size {len(batch)} < world_size {num_dp_workers}) to avoid OOM."
+                        )
+                        continue
+
+                    # recompute old_log_probs (pad when batch size not divisible by world_size)
                     with _timer("old", timing_raw):
-                        if use_single_worker:
-                            old_log_probs = ray.get(
-                                self.actor_rollout_wg._workers[0].actor_rollout_compute_log_probs.remote(batch)
-                            )
-                        elif len(batch) % num_dp_workers != 0:
+                        if len(batch) % num_dp_workers != 0:
                             batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
                             old_log_probs = self.actor_rollout_wg.compute_log_probs(batch_dp)
                             old_log_probs = unpad_dataproto(old_log_probs, pad_size)
@@ -1047,14 +1050,10 @@ class RayPPOTrainer:
                     # except StopIteration:
                     #     batch_dict_next_batch = None
 
-                    # compute ref_log_probs (single-worker path when batch smaller than world_size)
+                    # compute ref_log_probs (pad if needed for DP chunking)
                     if self.use_reference_policy:
                         with _timer("ref", timing_raw):
-                            if use_single_worker:
-                                ref_log_probs = ray.get(
-                                    self.ref_policy_wg._workers[0].ref_compute_ref_log_probs.remote(batch)
-                                )
-                            elif len(batch) % num_dp_workers != 0:
+                            if len(batch) % num_dp_workers != 0:
                                 batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
                                 ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch_dp)
                                 ref_log_probs = unpad_dataproto(ref_log_probs, pad_size)
@@ -1062,14 +1061,10 @@ class RayPPOTrainer:
                                 ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
                             batch = batch.union(ref_log_probs)
 
-                    # compute values (single-worker path when batch smaller than world_size)
+                    # compute values (pad if needed for DP chunking)
                     if self.use_critic:
                         with _timer("values", timing_raw):
-                            if use_single_worker:
-                                values = ray.get(
-                                    self.critic_wg._workers[0].critic_compute_values.remote(batch)
-                                )
-                            elif len(batch) % num_dp_workers != 0:
+                            if len(batch) % num_dp_workers != 0:
                                 batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
                                 values = self.critic_wg.compute_values(batch_dp)
                                 values = unpad_dataproto(values, pad_size)
@@ -1096,14 +1091,10 @@ class RayPPOTrainer:
                             lam=self.config.algorithm.lam,
                         )
 
-                    # update critic (single-worker path when batch smaller than world_size)
+                    # update critic (pad batch if needed for DP chunking)
                     if self.use_critic:
                         with _timer("update_critic", timing_raw):
-                            if use_single_worker:
-                                critic_output = ray.get(
-                                    self.critic_wg._workers[0].critic_update_critic.remote(batch)
-                                )
-                            elif len(batch) % num_dp_workers != 0:
+                            if len(batch) % num_dp_workers != 0:
                                 batch_dp, _ = pad_dataproto_to_divisor(batch, num_dp_workers)
                                 critic_output = self.critic_wg.update_critic(batch_dp)
                             else:
@@ -1111,14 +1102,10 @@ class RayPPOTrainer:
                         critic_metrics = reduce_metrics(critic_output.non_tensor_batch)
                         metrics.update(critic_metrics)
 
-                    # update actor (single-worker path when batch smaller than world_size)
+                    # update actor (pad batch if needed for DP chunking)
                     if self.config.trainer.critic_warmup <= self.global_step:
                         with _timer("update_actor", timing_raw):
-                            if use_single_worker:
-                                actor_output = ray.get(
-                                    self.actor_rollout_wg._workers[0].actor_rollout_update_actor.remote(batch)
-                                )
-                            elif len(batch) % num_dp_workers != 0:
+                            if len(batch) % num_dp_workers != 0:
                                 batch_dp, _ = pad_dataproto_to_divisor(batch, num_dp_workers)
                                 actor_output = self.actor_rollout_wg.update_actor(batch_dp)
                             else:
