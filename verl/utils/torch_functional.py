@@ -58,6 +58,18 @@ def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.T
     vocab_dim = logits.shape[-1]
     logits = logits.contiguous().view(-1, vocab_dim)
     labels = labels.contiguous().view(-1)
+    # In some dynamic batching paths (e.g. remote env + GRPO with truncation),
+    # labels can be off-by-one longer than logits after slicing.
+    # Cross-entropy expects matching batch sizes; trim the extra label token
+    # in that specific case while preserving the original logits shape.
+    if labels.numel() != logits.size(0):
+        if labels.numel() == logits.size(0) + 1:
+            labels = labels[:-1]
+        else:
+            raise ValueError(
+                f"log_probs_from_logits: logits batch {logits.size(0)} and labels batch {labels.numel()} mismatch "
+                "and are not off-by-one; this likely indicates an upstream slicing bug."
+            )
     if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
         output = log_probs_from_logits_flash_attn(logits, labels)
     else:  # fall back to torch kernel, upcast logits to fp32
