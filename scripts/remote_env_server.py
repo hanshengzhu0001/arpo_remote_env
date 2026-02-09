@@ -228,9 +228,11 @@ def env_evaluate():
     try:
         env.unpause()
         score = env.evaluate()
+        print(f"Evaluation completed: score={score}, instruction={instruction}, step_counter={step_counter}")
         return float(score)
     except Exception as e:
         print("Evaluation error:", e)
+        print(traceback.format_exc())
         return 0.0
 
 

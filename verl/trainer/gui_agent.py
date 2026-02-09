@@ -1117,7 +1117,9 @@ class RemoteEnvWorker:
         for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
             try:
                 score = self._post("/env/evaluate", {}, timeout=self.REMOTE_EVALUATE_TIMEOUT)
-                return float(score)
+                score_float = float(score)
+                print(f"RemoteEnvWorker[{self.worker_idx}] evaluate: score={score_float}, instruction={self.instruction}")
+                return score_float
             except Exception as e:
                 last_err = e
                 if attempt < self.REMOTE_EVALUATE_RETRIES:
