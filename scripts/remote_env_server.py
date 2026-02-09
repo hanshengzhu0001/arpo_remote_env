@@ -56,12 +56,12 @@ def _patch_docker_provider_ports() -> None:
     try:
         from desktop_env.providers.docker.provider import DockerProvider  # type: ignore
     except Exception as e:
-        print(f"Docker provider patch SKIPPED (import failed): {e}. Port allocation may fail on macOS (psutil.AccessDenied).")
+        print(f"Docker provider patch SKIPPED (import failed): {e}. Port allocation may fail on macOS (psutil.AccessDenied).", flush=True)
         return
 
     if getattr(DockerProvider, "_ARPO_PORT_PATCHED", False):
         return
-    print("Patching Docker provider for macOS: using socket bind + Docker ports (no psutil)...")
+    print("Patching Docker provider for macOS: using socket bind + Docker ports (no psutil)...", flush=True)
 
     def _get_docker_used_ports(self) -> set[int]:
         docker_ports: set[int] = set()
@@ -97,7 +97,7 @@ def _patch_docker_provider_ports() -> None:
 
     DockerProvider._get_available_port = _get_available_port  # type: ignore[attr-defined]
     DockerProvider._ARPO_PORT_PATCHED = True  # type: ignore[attr-defined]
-    print("Docker provider patched successfully (no psutil).")
+    print("Docker provider patched successfully (no psutil).", flush=True)
 
 # --- Server state: one env ---
 env: DesktopEnv | None = None
