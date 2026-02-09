@@ -15,6 +15,7 @@
 A unified tracking interface that supports logging data to different backend
 """
 
+import atexit
 import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -97,6 +98,18 @@ class WandbLogger(Logger):
             wandb.finish()
         except (BrokenPipeError, OSError):
             pass  # Process may be exiting; avoid noisy atexit traceback
+        # Unregister wandb's atexit so it doesn't run again at process exit and raise BrokenPipeError
+        try:
+            to_remove = []
+            for item in getattr(atexit, "_exithandlers", []):
+                func = item[0] if isinstance(item, (tuple, list)) else item
+                code = getattr(func, "__code__", None)
+                if code and "wandb" in getattr(code, "co_filename", ""):
+                    to_remove.append(item)
+            for item in to_remove:
+                atexit._exithandlers.remove(item)
+        except Exception:
+            pass
 
 
 class SwanlabLogger(Logger):
