@@ -55,11 +55,13 @@ def _patch_docker_provider_ports() -> None:
     """
     try:
         from desktop_env.providers.docker.provider import DockerProvider  # type: ignore
-    except Exception:
+    except Exception as e:
+        print(f"Docker provider patch SKIPPED (import failed): {e}. Port allocation may fail on macOS (psutil.AccessDenied).")
         return
 
     if getattr(DockerProvider, "_ARPO_PORT_PATCHED", False):
         return
+    print("Patching Docker provider for macOS: using socket bind + Docker ports (no psutil)...")
 
     def _get_docker_used_ports(self) -> set[int]:
         docker_ports: set[int] = set()
@@ -95,6 +97,7 @@ def _patch_docker_provider_ports() -> None:
 
     DockerProvider._get_available_port = _get_available_port  # type: ignore[attr-defined]
     DockerProvider._ARPO_PORT_PATCHED = True  # type: ignore[attr-defined]
+    print("Docker provider patched successfully (no psutil).")
 
 # --- Server state: one env ---
 env: DesktopEnv | None = None
@@ -384,6 +387,10 @@ def health():
         "message": "KVM hardware acceleration enabled" if kvm_available else "KVM not available, using software emulation"
     }
 
+
+# Patch Docker provider at startup when using docker (avoids psutil.AccessDenied on macOS before first /env/reset)
+if os.environ.get("PROVIDER", "docker").strip().lower() == "docker":
+    _patch_docker_provider_ports()
 
 if __name__ == "__main__":
     import uvicorn
