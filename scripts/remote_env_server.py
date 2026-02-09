@@ -7,8 +7,8 @@ Cluster EnvWorkers call this over HTTP.
 Aligns with ARPO_OSWorld_Evaluation / run_uitars.py:
 - Same DesktopEnv: observation_type=screenshot, action_space=pyautogui.
 - Reset returns obs_messages built from env screenshot (same as evaluation agent gets).
-- Provider: Docker by default (same as run_uitars.py). Set env PROVIDER=vmware to use
-  VMware VM instead (e.g. Mac with VMware and no Docker).
+- Provider: On macOS (Darwin), defaults to VMware (no /dev/kvm; use VMware Fusion).
+  On Linux, defaults to Docker. Override with env PROVIDER=vmware or PROVIDER=docker.
 """
 REMOTE_ENV_STAMP = "b36ed69-lifespan"  # grep this on Mac to confirm you have latest
 import sys
@@ -170,10 +170,17 @@ max_steps = 16
 instruction: str | None = None
 OBSERVATION_TYPE = "screenshot"  # same as run_uitars --observation_type screenshot
 
+def _default_provider() -> str:
+    """Use VMware on macOS (no KVM); Docker on Linux."""
+    if hasattr(os, "uname") and os.uname().sysname == "Darwin":
+        return "vmware"
+    return "docker"
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Always log so we confirm lifespan runs; then run Docker patch when provider is docker
-    provider = os.environ.get("PROVIDER", "docker").strip().lower() or "docker"
+    provider = (os.environ.get("PROVIDER") or _default_provider()).strip().lower() or "docker"
     logger.info("Startup: PROVIDER=%s, will patch Docker provider=%s", provider, provider == "docker")
     # Fallback so message always visible if uvicorn swallows app logger
     print(f"[remote_env_server] Startup: PROVIDER={provider}, patching Docker={provider == 'docker'}", file=sys.stderr, flush=True)
@@ -205,9 +212,8 @@ def _build_init_messages(screenshot_bytes: bytes, instruction_text: str) -> list
 def _get_env():
     global env
     if env is None:
-        # Same provider choice as ARPO_OSWorld_Evaluation / run_uitars (default docker).
-        # Use VMware when PROVIDER=vmware (e.g. Mac with VMware VM).
-        provider_name = os.environ.get("PROVIDER", "docker").strip().lower()
+        # Default: VMware on macOS (no KVM), Docker on Linux. Override with PROVIDER=vmware|docker.
+        provider_name = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
         if provider_name not in ("docker", "vmware"):
             provider_name = "docker"
         if provider_name == "docker":
