@@ -876,6 +876,19 @@ class RayPPOTrainer:
                             is_done_stats = ray.get([worker.is_done.remote() for worker in self.env_workers])
                             print(f'step_idx: {step_idx}, finished: {sum(is_done_stats)}')
 
+                            # Verify screenshots + instructions: obs_messages should have image(s) and instruction text
+                            _obs = next((x["obs_messages"] for x in env_outputs if x.get("obs_messages")), None)
+                            if _obs is not None:
+                                _n_msg, _n_img = len(_obs), sum(1 for m in _obs for c in (m.get("content") or []) if isinstance(c, dict) and c.get("type") == "image")
+                                _txt_len = 0
+                                for m in _obs:
+                                    for c in (m.get("content") or []):
+                                        if isinstance(c, dict) and "text" in c:
+                                            _txt_len += len(c.get("text", ""))
+                                print(f"verify_obs: step={step_idx} messages={_n_msg} images={_n_img} instruction_text_len={_txt_len}")
+                            else:
+                                print("verify_obs: step={} obs_messages is None (reset/step failed)".format(step_idx))
+
                             num_workers = len(self.actor_rollout_wg._workers)
                             with _timer("prepare_vllm_inputs", timing_raw):
                                 vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
@@ -896,6 +909,15 @@ class RayPPOTrainer:
                                 batch_keys=["input_ids", "attention_mask", "position_ids"],
                                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
                             )
+                            # Verify generation batch has images (screenshots) so model sees the env
+                            _mm = getattr(gen_batch, "non_tensor_batch", None) or {}
+                            _mm_data = _mm.get("multi_modal_data")
+                            if _mm_data is not None:
+                                _list = list(_mm_data) if hasattr(_mm_data, "__len__") and not isinstance(_mm_data, dict) else [_mm_data]
+                                _img_counts = [len((d.get("image") or [])) for d in _list]
+                                print(f"verify_gen_batch: multi_modal_data present, samples={len(_list)}, images_per_sample={_img_counts}")
+                            else:
+                                print("verify_gen_batch: multi_modal_data MISSING (model may not see screenshots)")
                             # predict actions
                             with _timer("actor_rollout_wg", timing_raw):
                                 action_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
