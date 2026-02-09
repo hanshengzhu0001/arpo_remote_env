@@ -72,8 +72,12 @@ def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.T
             )
     if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
         output = log_probs_from_logits_flash_attn(logits, labels)
-    else:  # fall back to torch kernel, upcast logits to fp32
-        output = F.cross_entropy(logits.float(), labels, reduction="none")
+    else:
+        # Fall back to torch kernel. For large vocab/sequence lengths, upcasting logits
+        # to fp32 can significantly increase memory and trigger CUDA OOM in smoke tests.
+        # We keep logits in their existing (typically bf16/fp16) dtype to reduce peak
+        # activation memory during cross-entropy.
+        output = F.cross_entropy(logits, labels, reduction="none")
 
     return output.view(*batch_dim)
 
