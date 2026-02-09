@@ -63,7 +63,8 @@ worker:
   rollout:
     temperature: 0.7
     n: 2  # GRPO requires n > 1
-    gpu_memory_utilization: 0.11
+    # Lower GPU memory utilization to leave more headroom for FSDP model init
+    gpu_memory_utilization: 0.08
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 1
