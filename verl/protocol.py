@@ -508,6 +508,8 @@ class DataProto:
         Returns:
             List[DataProto]: a list of DataProto after splitting
         """
+        if chunks <= 0:
+            return [self]
         assert len(self) % chunks == 0, (
             f"only support equal chunk. Got size of DataProto {len(self)} and chunk {chunks}."
         )
@@ -533,7 +535,11 @@ class DataProto:
         return output
 
     def split(self, split_size: int) -> List["DataProto"]:
+        if split_size <= 0:
+            return [self]
         chunks = len(self) // split_size
+        if chunks == 0:
+            return [self]
         return self.chunk(chunks)
 
     @staticmethod

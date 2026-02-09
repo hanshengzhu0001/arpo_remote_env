@@ -248,10 +248,12 @@ class DataParallelPPOActor(BasePPOActor):
                 mini_batches = tqdm(mini_batches, desc="Train mini-batches", position=2)
 
             for mini_batch in mini_batches:
+                micro_size = self.config.micro_batch_size_per_device_for_update
                 gradient_accumulation = (
-                    self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
+                    max(1, self.config.global_batch_size_per_device)
+                    // max(1, micro_size)
                 )
-                micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
+                micro_batches = mini_batch.split(micro_size)
                 if self.rank == 0:
                     micro_batches = tqdm(micro_batches, desc="Update policy", position=3)
 
