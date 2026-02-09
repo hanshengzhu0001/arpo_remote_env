@@ -53,7 +53,8 @@ worker:
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false
-      enable_rank0_init: true
+      # Disable rank0 init to reduce peak GPU memory during FSDP model initialization
+      enable_rank0_init: false
     offload:
       offload_params: false
       offload_optimizer: false
