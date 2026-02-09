@@ -28,11 +28,39 @@ def is_rank0() -> int:
     return (not dist.is_initialized()) or (dist.get_rank() == 0)
 
 
-def print_gpu_memory_usage(prefix: str = "GPU memory usage") -> None:
-    """Report the current GPU VRAM usage."""
-    if is_rank0():
-        free_mem, total_mem = torch.cuda.mem_get_info()
-        print(f"{prefix}: {(total_mem - free_mem) / (1024**3):.2f} GB / {total_mem / (1024**3):.2f} GB.")
+def print_gpu_memory_usage(prefix: str = "GPU memory usage", per_rank: bool = False) -> None:
+    """Report the current GPU VRAM usage with detailed breakdown.
+    
+    Args:
+        prefix: Label for the memory report
+        per_rank: If True, print memory for all ranks; if False, only rank 0
+    """
+    if not torch.cuda.is_available():
+        return
+    
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    world_size = dist.get_world_size() if dist.is_initialized() else 1
+    
+    # Always print for rank 0, or print for all ranks if per_rank=True
+    should_print = (rank == 0) or per_rank
+    
+    if should_print:
+        device = torch.cuda.current_device()
+        free_mem, total_mem = torch.cuda.mem_get_info(device)
+        allocated_mem = torch.cuda.memory_allocated(device)
+        reserved_mem = torch.cuda.memory_reserved(device)
+        max_allocated = torch.cuda.max_memory_allocated(device)
+        max_reserved = torch.cuda.max_memory_reserved(device)
+        
+        used_mem = total_mem - free_mem
+        print(
+            f"[Rank {rank}/{world_size}] {prefix}:\n"
+            f"  Used: {used_mem / (1024**3):.2f} GB / {total_mem / (1024**3):.2f} GB ({used_mem/total_mem*100:.1f}%)\n"
+            f"  Allocated: {allocated_mem / (1024**3):.2f} GB\n"
+            f"  Reserved: {reserved_mem / (1024**3):.2f} GB\n"
+            f"  Max Allocated: {max_allocated / (1024**3):.2f} GB\n"
+            f"  Max Reserved: {max_reserved / (1024**3):.2f} GB"
+        )
 
 
 def _get_model_size(model: nn.Module, scale: str = "auto") -> Tuple[float, str]:

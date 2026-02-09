@@ -196,6 +196,7 @@ class FSDPWorker(Worker):
         else:
             auto_class = AutoModelForCausalLM
 
+        print_gpu_memory_usage("BEFORE model loading", per_rank=True)
         if (not fsdp_config.enable_rank0_init) or self.device_mesh.get_local_rank("fsdp") == 0:
             # Avoid Transformers' caching_allocator_warmup on CUDA, which can allocate large
             # temporary buffers and trigger OOM during model load on multi-GPU smoke tests.
@@ -213,6 +214,7 @@ class FSDPWorker(Worker):
             # When enable_rank0_init=False, load onto CPU first to avoid OOM during checkpoint loading.
             # FSDP will handle moving to CUDA and sharding after the model is loaded.
             # When enable_rank0_init=True, rank 0 loads full model on CPU, then FSDP shards it.
+            print_gpu_memory_usage("BEFORE from_pretrained", per_rank=True)
             model = auto_class.from_pretrained(
                 model_config.model_path,
                 config=self.model_config,
@@ -232,10 +234,13 @@ class FSDPWorker(Worker):
                 )
 
         assert isinstance(model, PreTrainedModel)  # lint
+        print_gpu_memory_usage("AFTER from_pretrained, BEFORE tie_weights", per_rank=True)
         model.tie_weights()  # avoid hanging
+        print_gpu_memory_usage("AFTER tie_weights, BEFORE to(device='cpu')", per_rank=True)
         # Keep model on CPU and only change dtype; FSDP will move to CUDA and shard.
         # Explicitly ensure CPU device to avoid any accidental CUDA allocations.
         model = model.to(device="cpu", dtype=torch_dtype)
+        print_gpu_memory_usage("AFTER to(device='cpu')", per_rank=True)
         if model_config.enable_gradient_checkpointing:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
@@ -254,10 +259,12 @@ class FSDPWorker(Worker):
         # pending CUDA OOM errors from earlier operations. The barrier itself will
         # synchronize distributed processes without needing explicit CUDA sync.
         if torch.cuda.is_available():
+            print_gpu_memory_usage("BEFORE empty_cache and barrier", per_rank=True)
             torch.cuda.empty_cache()
+            print_gpu_memory_usage("AFTER empty_cache, BEFORE barrier", per_rank=True)
         dist.barrier()
         print_model_size(model)
-        print_gpu_memory_usage("After huggingface model init")
+        print_gpu_memory_usage("After huggingface model init and barrier", per_rank=True)
         mixed_precision = MixedPrecision(
             param_dtype=PrecisionType.to_dtype(fsdp_config.mp_param_dtype),
             reduce_dtype=PrecisionType.to_dtype(fsdp_config.mp_reduce_dtype),
@@ -265,6 +272,7 @@ class FSDPWorker(Worker):
         )
         auto_wrap_policy = get_fsdp_wrap_policy(model)
         self.print_rank0(f"FSDP wrap policy: {auto_wrap_policy}.")
+        print_gpu_memory_usage("BEFORE FSDP wrapping", per_rank=True)
 
         if self.device_mesh.ndim == 2:
             if fsdp_config.enable_full_shard:
@@ -302,7 +310,7 @@ class FSDPWorker(Worker):
             use_orig_params=fsdp_config.use_orig_params,
             device_mesh=self.device_mesh,
         )
-        print_gpu_memory_usage("After FSDP module init")
+        print_gpu_memory_usage("After FSDP module init", per_rank=True)
 
         if self._is_actor or self._is_critic:
             if optim_config.strategy == "adamw":
