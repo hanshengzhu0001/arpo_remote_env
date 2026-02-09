@@ -977,11 +977,10 @@ class RayPPOTrainer:
                         reward_stds_list = []
                         for task_id in task_id_set:
                             reward_in_group = batch.batch["rewards"][batch.non_tensor_batch["task_id"] == task_id]
-                            # compute std in gruop
-                            reward_std = reward_in_group.std().item()
+                            # std undefined for 0 or 1 element; use 0.0 to avoid nan and UserWarning
+                            reward_std = 0.0 if reward_in_group.numel() <= 1 else reward_in_group.std().item()
                             reward_stds_list.append(reward_std)
-                        
-                        
+
                         num_invalid_group = len([x_std for x_std in reward_stds_list if x_std < 0.01])
                         print(f"num_invalid_group: {num_invalid_group}/{len(reward_stds_list)} | reward_stds_list: {reward_stds_list}")
 
