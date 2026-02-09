@@ -225,11 +225,22 @@ class DataParallelPPOActor(BasePPOActor):
 
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
-        mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
+        # NOTE: In remote smoke-test settings we can have very small batches (e.g. len(data)==1) and
+        # world_size > len(data), which can lead to an effective global_batch_size_per_device of 0.
+        # That causes DataProto.split(chunk=0) to raise ZeroDivisionError. For these tiny batches,
+        # just treat the whole batch as a single mini-batch.
+        data_selected = data.select(select_keys, non_tensor_select_keys)
+        chunks = self.config.global_batch_size_per_device
+        if chunks <= 0 or len(data_selected) <= chunks:
+            mini_batches = [data_selected]
+        else:
+            mini_batches = data_selected.split(chunks)
+
         print("data size: ", len(data), len(mini_batches))
         print('Global batch Size per device:', self.config.global_batch_size_per_device)
         print('micro batch size per device for update:', self.config.micro_batch_size_per_device_for_update)
-        print('Gradient accumulation:', self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update)
+        if self.config.global_batch_size_per_device > 0:
+            print('Gradient accumulation:', self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update)
 
         metrics = defaultdict(list)
         for _ in range(self.config.ppo_epochs):
