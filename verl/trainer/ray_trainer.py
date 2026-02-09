@@ -1012,13 +1012,11 @@ class RayPPOTrainer:
                     
 
                     # ARPO = GRPO advantage + no KL (disable_kl) + experience replay. GRPO needs rollout.n>1 samples per task.
-                    # When batch size < world_size (e.g. 1 remote env), skip PPO to avoid OOM; GRPO is not applied this step.
+                    # For remote-env smoke tests we may have very small batches (e.g. 1 env, rollout.n=2) while world_size=4 FSDP ranks.
+                    # Instead of skipping PPO when batch < world_size, rely on padding to safely distribute work across ranks.
                     num_dp_workers = self.actor_rollout_wg.world_size
-                    use_single_worker = len(batch) < num_dp_workers
-                    if use_single_worker:
-                        print(
-                            f"Skipping PPO update this step (batch size {len(batch)} < world_size {num_dp_workers}) to avoid OOM."
-                        )
+                    if len(batch) == 0:
+                        print("Skipping PPO update this step (empty batch).")
                         continue
 
                     # recompute old_log_probs (pad when batch size not divisible by world_size)
