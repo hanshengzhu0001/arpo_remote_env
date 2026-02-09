@@ -41,17 +41,38 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
     max_prompt_length = prompt_mask.size(-1)
     prompt_length = prompt_mask.sum(-1).float()
     response_length = response_mask.sum(-1).float()
-    num_images = (batch.batch["input_ids"] == 151655).bool().sum(-1).float() // 2691 # image_pad
-    response_length = response_length / num_images # average response length per action
+    num_images = (batch.batch["input_ids"] == 151655).bool().sum(-1).float() // 2691  # image_pad
+    response_length = response_length / num_images  # average response length per action
 
     valid_adv = torch.masked_select(advantages, response_mask)
     valid_returns = torch.masked_select(returns, response_mask)
 
+    # For tiny smoke-test batches it is possible that response_mask is all zeros,
+    # which makes valid_adv/valid_returns (and valid_values) empty tensors.
+    # Directly calling max/min/mean on empty tensors raises runtime errors, so we
+    # guard these statistics and fall back to 0.0 when there is no valid data.
+    def _safe_stats(x: torch.Tensor) -> tuple[float, float, float]:
+        if x.numel() == 0:
+            return 0.0, 0.0, 0.0
+        return (
+            torch.mean(x).detach().item(),
+            torch.max(x).detach().item(),
+            torch.min(x).detach().item(),
+        )
+
+    adv_mean, adv_max, adv_min = _safe_stats(valid_adv)
+    ret_mean, ret_max, ret_min = _safe_stats(valid_returns)
+
     if use_critic:
         values = batch.batch["values"]
         valid_values = torch.masked_select(values, response_mask)
-        return_diff_var = torch.var(valid_returns - valid_values)
-        return_var = torch.var(valid_returns)
+        val_mean, val_max, val_min = _safe_stats(valid_values)
+        if valid_returns.numel() > 0 and valid_values.numel() > 0:
+            return_diff_var = torch.var(valid_returns - valid_values)
+            return_var = torch.var(valid_returns)
+            vf_explained_var = (1.0 - return_diff_var / (return_var + 1e-5)).detach().item()
+        else:
+            vf_explained_var = 0.0
 
     metrics = {
         # score
@@ -63,21 +84,21 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
         "critic/rewards/max": torch.max(sequence_reward).detach().item(),
         "critic/rewards/min": torch.min(sequence_reward).detach().item(),
         # adv
-        "critic/advantages/mean": torch.mean(valid_adv).detach().item(),
-        "critic/advantages/max": torch.max(valid_adv).detach().item(),
-        "critic/advantages/min": torch.min(valid_adv).detach().item(),
+        "critic/advantages/mean": adv_mean,
+        "critic/advantages/max": adv_max,
+        "critic/advantages/min": adv_min,
         # returns
-        "critic/returns/mean": torch.mean(valid_returns).detach().item(),
-        "critic/returns/max": torch.max(valid_returns).detach().item(),
-        "critic/returns/min": torch.min(valid_returns).detach().item(),
+        "critic/returns/mean": ret_mean,
+        "critic/returns/max": ret_max,
+        "critic/returns/min": ret_min,
         **(
             {
                 # values
-                "critic/values/mean": torch.mean(valid_values).detach().item(),
-                "critic/values/max": torch.max(valid_values).detach().item(),
-                "critic/values/min": torch.min(valid_values).detach().item(),
+                "critic/values/mean": val_mean,
+                "critic/values/max": val_max,
+                "critic/values/min": val_min,
                 # vf explained var
-                "critic/vf_explained_var": (1.0 - return_diff_var / (return_var + 1e-5)).detach().item(),
+                "critic/vf_explained_var": vf_explained_var,
             }
             if use_critic
             else {}
@@ -106,13 +127,12 @@ def compute_timing_metrics(batch: DataProto, timing_raw: Dict[str, float]) -> Di
         **dict.fromkeys(["gen", "reward"], num_response_tokens),
         **dict.fromkeys(["ref", "old", "values", "adv", "update_critic", "update_actor"], num_overall_tokens),
     }
-    return {
-        **{f"timing_s/{name}": value for name, value in timing_raw.items()},
-        **{
-            f"timing_per_token_ms/{name}": timing_raw[name] * 1000 / num_tokens_of_section[name]
-            for name in set(num_tokens_of_section.keys()) & set(timing_raw.keys())
-        },
-    }
+    timing_metrics: Dict[str, Any] = {f"timing_s/{name}": value for name, value in timing_raw.items()}
+    for name in set(num_tokens_of_section.keys()) & set(timing_raw.keys()):
+        denom = num_tokens_of_section[name]
+        if denom > 0:
+            timing_metrics[f"timing_per_token_ms/{name}"] = timing_raw[name] * 1000 / denom
+    return timing_metrics
 
 
 def compute_throughout_metrics(batch: DataProto, timing_raw: Dict[str, float], n_gpus: int) -> Dict[str, Any]:
