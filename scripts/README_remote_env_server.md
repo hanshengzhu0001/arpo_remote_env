@@ -2,9 +2,13 @@
 
 **Architecture:**
 - **Resource (GPUs, model, rollout):** current cluster.
-- **Executions (reset / step / evaluate):** remote env server on Mac, using **VMware** (default on macOS).
+- **Executions (reset / step / evaluate):** remote env server (on Mac with VMware, or inside a Linux VM with Docker+KVM).
 
-The cluster runs ARPO training and sends env requests (reset, step, evaluate) to the Mac over HTTP. On the Mac, the server uses VMware Fusion by default (no Docker/KVM required).
+The cluster runs ARPO training and sends env requests (reset, step, evaluate) to the remote server over HTTP.
+
+**Two options for where the env runs:**
+- **Simple (Mac + VMware):** Run the server on the Mac; it uses VMware Fusion by default. See sections below.
+- **Nested KVM (Fusion → Linux VM → Docker):** Run a Linux VM in Fusion with nested virtualization, then run the server + Docker inside that VM for KVM-accelerated containers. See **[README_remote_env_nested_kvm.md](README_remote_env_nested_kvm.md)**.
 
 ## 1. On Mac (env server – VMware)
 
