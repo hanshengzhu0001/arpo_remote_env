@@ -15,6 +15,7 @@
 The main entry point to run the PPO algorithm
 """
 
+import os
 from typing import Literal, Optional, Union
 from contextlib import nullcontext
 
@@ -74,7 +75,10 @@ class FSDPWorker(Worker):
         self.role = role
 
         if not dist.is_initialized():
-            dist.init_process_group(backend="nccl")
+            # Pin each rank to its GPU so NCCL doesn't guess (avoids hang/OOM on heterogeneous mapping)
+            device_id = int(
+                os.environ.get("LOCAL_RANK", os.environ.get("RAY_LOCAL_RANK", os.environ.get("RANK", "0")))
+            dist.init_process_group(backend="nccl", device_id=device_id)
 
         # improve numerical stability
         torch.backends.cuda.matmul.allow_tf32 = False
