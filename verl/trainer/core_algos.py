@@ -164,9 +164,20 @@ def compute_grpo_outcome_advantage(
         id2score[index[i]].append(scores[i])
 
     for idx in id2score:
-        assert len(id2score[idx]) > 1, "GRPO needs rollout.n > 1."
-        id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
-        id2std[idx] = torch.std(torch.tensor(id2score[idx]))
+        sample_scores = torch.tensor(
+            id2score[idx], device=token_level_rewards.device, dtype=token_level_rewards.dtype
+        )
+        sample_num = sample_scores.numel()
+        if sample_num > 1:
+            # Standard GRPO: normalize within group.
+            id2mean[idx] = torch.mean(sample_scores)
+            id2std[idx] = torch.std(sample_scores)
+        else:
+            # Degenerate case for smoke tests: only one rollout for this id (e.g. single remote env).
+            # Fall back to a REINFORCE-style estimate by leaving scores unchanged after "normalization":
+            # use zero mean and unit std so (score - mean)/std == score.
+            id2mean[idx] = torch.zeros((), device=token_level_rewards.device, dtype=token_level_rewards.dtype)
+            id2std[idx] = torch.ones((), device=token_level_rewards.device, dtype=token_level_rewards.dtype)
 
     for i in range(bsz):
         scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
