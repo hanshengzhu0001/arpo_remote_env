@@ -869,6 +869,7 @@ class RayPPOTrainer:
                         print(f"reset_time: {timing_raw['env_reset']}")
 
                         env_outputs = reset_outputs
+                        batch_skipped = False  # set True when remote env fails and vllm_batch is invalid
                         for step_idx in range(self.config.env.max_steps):
                             is_done_stats = ray.get([worker.is_done.remote() for worker in self.env_workers])
                             print(f'step_idx: {step_idx}, finished: {sum(is_done_stats)}')
@@ -878,6 +879,11 @@ class RayPPOTrainer:
                                 vllm_batch, valid_env_idx = self.prepare_vllm_inputs_full(env_outputs)
 
                             print('prepare_vllm_inputs_time: ', timing_raw['prepare_vllm_inputs'])
+                            if vllm_batch is None or not isinstance(vllm_batch, DataProto):
+                                # No valid env outputs (e.g. remote env 500). Skip generation for this batch.
+                                batch_skipped = True
+                                format_rewards = [0.0] * len(task_configs)
+                                break
                             vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, num_workers)
 
                             gen_batch = vllm_batch_pad.pop(
@@ -915,7 +921,8 @@ class RayPPOTrainer:
 
                         # start evaluation
                         # eval_results = [worker.evaluate.remote() for worker in self.env_workers]
-                        assert None not in eval_results_objects, 'eval_results_objects should not be None'
+                        if not batch_skipped:
+                            assert None not in eval_results_objects, 'eval_results_objects should not be None'
 
                         # if self.global_step % 1 == 0:
                             # self.save_rollout_trajectories(action_batch_output, history_messages, eval_results, task_configs)
@@ -923,7 +930,10 @@ class RayPPOTrainer:
                     self.actor_rollout_wg.finish_generate_sequences()
 
                     with _timer("evaluate_env", timing_raw):
-                        eval_results = ray.get(eval_results_objects)
+                        if batch_skipped:
+                            eval_results = [0.0] * len(task_configs)
+                        else:
+                            eval_results = ray.get(eval_results_objects)
                         # eval_results = ray.get(eval_results)
                     print('evaluate_env_time: ', timing_raw['evaluate_env'])
                     

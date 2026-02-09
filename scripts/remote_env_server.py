@@ -20,6 +20,11 @@ from io import BytesIO
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+try:
+    import docker
+except ImportError:
+    docker = None
+
 from desktop_env.desktop_env import DesktopEnv
 from verl.trainer.remote_env_protocol import messages_to_wire
 from verl.trainer.gui_agent import (
@@ -64,15 +69,33 @@ def _build_init_messages(screenshot_bytes: bytes, instruction_text: str) -> list
 def _get_env():
     global env
     if env is None:
-        env = DesktopEnv(
-            provider_name="docker",
-            action_space="pyautogui",
-            screen_size=(1920, 1080),
-            cache_dir="cache_dirs/cache_0",
-            headless=True,
-            os_type="Ubuntu",
-            require_a11y_tree=False,
-        )
+        try:
+            env = DesktopEnv(
+                provider_name="docker",
+                action_space="pyautogui",
+                screen_size=(1920, 1080),
+                cache_dir="cache_dirs/cache_0",
+                headless=True,
+                os_type="Ubuntu",
+                require_a11y_tree=False,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            is_docker_error = (
+                docker is not None
+                and isinstance(e, docker.errors.DockerException)
+            ) or "docker" in str(e).lower() or "connection aborted" in str(e).lower()
+            if is_docker_error:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Docker is not available. Install Docker Desktop and start it, or ensure the Docker "
+                        "daemon is running and the socket is available (e.g. /var/run/docker.sock). "
+                        f"Original error: {e}"
+                    ),
+                ) from e
+            raise
     return env
 
 

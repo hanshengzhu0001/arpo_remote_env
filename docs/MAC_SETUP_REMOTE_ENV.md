@@ -35,19 +35,27 @@ conda activate arpo_env
 
 ## 3. Install dependencies (Mac / CPU only)
 
-- **Repo requirements** (includes FastAPI, uvicorn, ray, and all OSWorld deps; skip GPU-only if any fail):
+- **FastAPI + server:** required for the remote env server.
+
+```bash
+pip install "fastapi>=0.100" "uvicorn[standard]" requests pydantic
+```
+
+- **Repo requirements** (skip GPU-only packages: `vllm`, `flash_attn`, `liger_kernel`):
 
 ```bash
 pip install -r requirements.txt
 ```
 
-- **OSWorld** (for the server’s `DesktopEnv`; if not already satisfied by the above):
+If something in `requirements.txt` fails (e.g. GPU-only), install the rest and leave that one out.
+
+- **OSWorld / desktop_env** (for the server’s `DesktopEnv`):
 
 ```bash
 pip install -r OSWorld/requirements.txt
+# If there is a desktop_env-specific requirements file:
+# pip install -r OSWorld/desktop_env/requirements.txt
 ```
-
-If something in `requirements.txt` fails (e.g. GPU-only), install the rest and leave that one out.
 
 ---
 
@@ -56,6 +64,7 @@ If something in `requirements.txt` fails (e.g. GPU-only), install the rest and l
 The server runs one OSWorld env using the **Docker** provider and an Ubuntu VM image.
 
 - Install **Docker Desktop** (or Docker Engine) and ensure the Docker daemon is running.
+- **Start Docker on Mac:** open **Docker Desktop** from Applications (or run `open -a Docker` in Terminal) and wait until the menu bar icon shows Docker is running (not "Starting…").
 - Follow **OSWorld’s Docker setup** for the Ubuntu VM (e.g. build or download the image and put it where the Docker provider expects).
 - See `OSWorld/desktop_env/providers/docker/` and the main OSWorld README for VM image and `docker_vm_data` (or equivalent) setup.
 
