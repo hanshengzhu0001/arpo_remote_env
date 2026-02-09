@@ -56,10 +56,10 @@ class DataParallelPPOActor(BasePPOActor):
         self.rank = int(os.getenv("RANK", "0"))
         self.actor_module = actor_module
         self.actor_optimizer = actor_optimizer
-        if config.use_torch_compile:
-            self.log_probs_from_logits = torch.compile(VF.log_probs_from_logits, dynamic=True)
-        else:
-            self.log_probs_from_logits = VF.log_probs_from_logits
+        # TorchDynamo/torch.compile can produce fake-tensor shape mismatches for cross_entropy
+        # in dynamic remote-env / GRPO batches (e.g. different symbolic batch dims for logits vs labels).
+        # For stability in PPO training (including smoke tests), always use the eager implementation.
+        self.log_probs_from_logits = VF.log_probs_from_logits
 
     def _forward_micro_batch(self, micro_batch: Dict[str, torch.Tensor], temperature: float) -> torch.Tensor:
         """
