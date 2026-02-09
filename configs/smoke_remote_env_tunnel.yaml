@@ -94,7 +94,7 @@ env:
   remote_server_url: "http://127.0.0.1:15001"  # SSH tunnel forwards cluster localhost -> Mac
 
 trainer:
-  total_episodes: 1
+  total_episodes: 10
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
   experiment_name: uitars_2b_remote_env
