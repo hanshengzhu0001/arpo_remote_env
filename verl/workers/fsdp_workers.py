@@ -77,7 +77,7 @@ class FSDPWorker(Worker):
         if not dist.is_initialized():
             # Pin each rank to its GPU so NCCL doesn't guess (avoids hang/OOM on heterogeneous mapping)
             device_id = int(
-                os.environ.get("LOCAL_RANK", os.environ.get("RAY_LOCAL_RANK", os.environ.get("RANK", "0")))
+                os.environ.get("LOCAL_RANK", os.environ.get("RAY_LOCAL_RANK", os.environ.get("RANK", "0"))))
             dist.init_process_group(backend="nccl", device_id=device_id)
 
         # improve numerical stability
