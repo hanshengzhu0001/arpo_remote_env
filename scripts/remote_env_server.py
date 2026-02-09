@@ -10,6 +10,7 @@ Aligns with ARPO_OSWorld_Evaluation / run_uitars.py:
 - Provider: Docker by default (same as run_uitars.py). Set env PROVIDER=vmware to use
   VMware VM instead (e.g. Mac with VMware and no Docker).
 """
+REMOTE_ENV_STAMP = "b36ed69-lifespan"  # grep this on Mac to confirm you have latest
 import sys
 from pathlib import Path
 
@@ -31,6 +32,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logger = logging.getLogger("uvicorn.error")
+
+# Unconditional print on import so we know this file is loaded (e.g. on Mac after git pull)
+print("[remote_env_server] module loaded", file=sys.stderr, flush=True)
 
 try:
     import docker
