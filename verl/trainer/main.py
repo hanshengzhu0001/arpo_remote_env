@@ -107,7 +107,11 @@ def main():
     print(ray.cluster_resources().keys())
 
     runner = Runner.remote()
-    ray.get(runner.run.remote(ppo_config))
+    try:
+        ray.get(runner.run.remote(ppo_config))
+    finally:
+        # Orderly shutdown to avoid segfault during process exit (vLLM/Ray teardown)
+        ray.shutdown()
 
 
 if __name__ == "__main__":

@@ -25,13 +25,30 @@ from torch.utils.tensorboard import SummaryWriter
 from ..py_functional import convert_dict_to_str, flatten_dict, is_package_available, unflatten_dict
 from .gen_logger import AggregateGenerationsLogger
 
+# Capture wandb's atexit handler when it registers (Python 3.13+ has no atexit._exithandlers).
+_wandb_atexit_handlers: List[Any] = []
+_atexit_register_orig = atexit.register
+
+
+def _atexit_register_capture(func: Any, *args: Any, **kwargs: Any) -> Any:
+    _atexit_register_orig(func, *args, **kwargs)
+    try:
+        code = getattr(func, "__code__", None)
+        if code and "wandb" in getattr(code, "co_filename", ""):
+            _wandb_atexit_handlers.append(func)
+    except Exception:
+        pass
+    return None
+
 
 if is_package_available("mlflow"):
     import mlflow  # type: ignore
 
 
 if is_package_available("wandb"):
+    atexit.register = _atexit_register_capture  # type: ignore[assignment]
     import wandb  # type: ignore
+    # Leave patch in place so we also capture handler registered at wandb.init() time
 
 
 if is_package_available("swanlab"):
@@ -99,15 +116,15 @@ class WandbLogger(Logger):
         except (BrokenPipeError, OSError):
             pass  # Process may be exiting; avoid noisy atexit traceback
         # Unregister wandb's atexit so it doesn't run again at process exit and raise BrokenPipeError
+        # (Python 3.13+ has no atexit._exithandlers; we captured handlers via patched register.)
         try:
-            to_remove = []
-            for item in getattr(atexit, "_exithandlers", []):
-                func = item[0] if isinstance(item, (tuple, list)) else item
-                code = getattr(func, "__code__", None)
-                if code and "wandb" in getattr(code, "co_filename", ""):
-                    to_remove.append(item)
-            for item in to_remove:
-                atexit._exithandlers.remove(item)
+            for func in _wandb_atexit_handlers:
+                try:
+                    atexit.unregister(func)
+                except Exception:
+                    pass
+            _wandb_atexit_handlers.clear()
+            atexit.register = _atexit_register_orig  # type: ignore[assignment]
         except Exception:
             pass
 
