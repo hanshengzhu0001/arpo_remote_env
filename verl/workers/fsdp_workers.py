@@ -233,7 +233,9 @@ class FSDPWorker(Worker):
 
         assert isinstance(model, PreTrainedModel)  # lint
         model.tie_weights()  # avoid hanging
-        model = model.to(torch_dtype)
+        # Keep model on CPU and only change dtype; FSDP will move to CUDA and shard.
+        # Explicitly ensure CPU device to avoid any accidental CUDA allocations.
+        model = model.to(device="cpu", dtype=torch_dtype)
         if model_config.enable_gradient_checkpointing:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
@@ -248,6 +250,9 @@ class FSDPWorker(Worker):
             else:
                 self.print_rank0("No vision tower found.")
 
+        # Clear CUDA cache before barrier to avoid OOM from any stray allocations
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         dist.barrier()
         print_model_size(model)
         print_gpu_memory_usage("After huggingface model init")
