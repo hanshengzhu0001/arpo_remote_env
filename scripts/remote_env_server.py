@@ -115,8 +115,12 @@ OBSERVATION_TYPE = "screenshot"  # same as run_uitars --observation_type screens
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    # Run Docker provider patch during startup so it appears in uvicorn logs
-    if os.environ.get("PROVIDER", "docker").strip().lower() == "docker":
+    # Always log so we confirm lifespan runs; then run Docker patch when provider is docker
+    provider = os.environ.get("PROVIDER", "docker").strip().lower() or "docker"
+    logger.info("Startup: PROVIDER=%s, will patch Docker provider=%s", provider, provider == "docker")
+    # Fallback so message always visible if uvicorn swallows app logger
+    print(f"[remote_env_server] Startup: PROVIDER={provider}, patching Docker={provider == 'docker'}", file=sys.stderr, flush=True)
+    if provider == "docker":
         _patch_docker_provider_ports()
     yield
 
