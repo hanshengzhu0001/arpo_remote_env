@@ -645,8 +645,10 @@ class RayPPOTrainer:
         """Reorder the data on single controller such that each dp rank gets similar total tokens"""
         attention_mask = batch.batch["attention_mask"]
         batch_size = attention_mask.shape[0]
-        global_seqlen_lst = batch.batch["attention_mask"].view(batch_size, -1).sum(-1).tolist()  # (train_batch_size,)
         world_size = self.actor_rollout_wg.world_size
+        if batch_size < world_size:
+            return
+        global_seqlen_lst = batch.batch["attention_mask"].view(batch_size, -1).sum(-1).tolist()  # (train_batch_size,)
         global_partition_lst = get_seqlen_balanced_partitions(
             global_seqlen_lst, k_partitions=world_size, equal_size=True
         )
@@ -1010,9 +1012,15 @@ class RayPPOTrainer:
                         print('Global eval_results: ', sum(reward_tensor.tolist())/len(batch))
                     
 
-                    # recompute old_log_probs
+                    # recompute old_log_probs (pad batch so it can be chunked across DP workers)
+                    num_dp_workers = self.actor_rollout_wg.world_size
                     with _timer("old", timing_raw):
-                        old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
+                        if len(batch) % num_dp_workers != 0:
+                            batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
+                            old_log_probs = self.actor_rollout_wg.compute_log_probs(batch_dp)
+                            old_log_probs = unpad_dataproto(old_log_probs, pad_size)
+                        else:
+                            old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
                         batch = batch.union(old_log_probs)
 
                     # balance the number of valid tokens on each dp rank.
@@ -1034,16 +1042,26 @@ class RayPPOTrainer:
                     # except StopIteration:
                     #     batch_dict_next_batch = None
 
-                    # compute ref_log_probs
+                    # compute ref_log_probs (pad if needed for DP chunking)
                     if self.use_reference_policy:
                         with _timer("ref", timing_raw):
-                            ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
+                            if len(batch) % num_dp_workers != 0:
+                                batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
+                                ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch_dp)
+                                ref_log_probs = unpad_dataproto(ref_log_probs, pad_size)
+                            else:
+                                ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
                             batch = batch.union(ref_log_probs)
 
-                    # compute values
+                    # compute values (pad if needed for DP chunking)
                     if self.use_critic:
                         with _timer("values", timing_raw):
-                            values = self.critic_wg.compute_values(batch)
+                            if len(batch) % num_dp_workers != 0:
+                                batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
+                                values = self.critic_wg.compute_values(batch_dp)
+                                values = unpad_dataproto(values, pad_size)
+                            else:
+                                values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
                     with _timer("adv", timing_raw):
@@ -1065,18 +1083,25 @@ class RayPPOTrainer:
                             lam=self.config.algorithm.lam,
                         )
 
-                    # update critic
+                    # update critic (pad batch if needed for DP chunking)
                     if self.use_critic:
                         with _timer("update_critic", timing_raw):
-                            critic_output = self.critic_wg.update_critic(batch)
-
+                            if len(batch) % num_dp_workers != 0:
+                                batch_dp, _ = pad_dataproto_to_divisor(batch, num_dp_workers)
+                                critic_output = self.critic_wg.update_critic(batch_dp)
+                            else:
+                                critic_output = self.critic_wg.update_critic(batch)
                         critic_metrics = reduce_metrics(critic_output.non_tensor_batch)
                         metrics.update(critic_metrics)
 
-                    # update actor
+                    # update actor (pad batch if needed for DP chunking)
                     if self.config.trainer.critic_warmup <= self.global_step:
                         with _timer("update_actor", timing_raw):
-                            actor_output = self.actor_rollout_wg.update_actor(batch)
+                            if len(batch) % num_dp_workers != 0:
+                                batch_dp, _ = pad_dataproto_to_divisor(batch, num_dp_workers)
+                                actor_output = self.actor_rollout_wg.update_actor(batch_dp)
+                            else:
+                                actor_output = self.actor_rollout_wg.update_actor(batch)
 
                         actor_metrics = reduce_metrics(actor_output.non_tensor_batch)
                         metrics.update(actor_metrics)
