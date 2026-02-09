@@ -108,7 +108,21 @@ class WandbLogger(Logger):
         )
         if config["trainer"].get("wandb_entity"):
             init_kwargs["entity"] = config["trainer"]["wandb_entity"]
-        wandb.init(**init_kwargs)
+        if os.environ.get("WANDB_MODE"):
+            init_kwargs["mode"] = os.environ["WANDB_MODE"]
+        try:
+            wandb.init(**init_kwargs)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "403" in str(e) or "400" in str(e) or "permission_error" in err_str or "organization" in err_str or "personal entities" in err_str or "team entity" in err_str:
+                print(
+                    f"Wandb init failed (entity may be org not team, or personal disabled): {e}. "
+                    "Falling back to offline mode; sync later with: wandb sync <run_dir>"
+                )
+                init_kwargs["mode"] = "offline"
+                wandb.init(**init_kwargs)
+            else:
+                raise
 
     def log(self, data: Dict[str, Any], step: int) -> None:
         wandb.log(data=data, step=step)

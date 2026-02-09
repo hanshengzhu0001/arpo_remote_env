@@ -108,7 +108,7 @@ trainer:
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
   experiment_name: uitars_2b_remote_env
-  # Runs go to this wandb entity (username or team). Login with: wandb login
-  wandb_entity: hanszhu05-university-of-pennsylvania-org
+  # W&B: team entity (not org). Login: wandb login
+  wandb_entity: hanszhu05-university-of-pennsylvania
   n_gpus_per_node: 4
   nnodes: 1
