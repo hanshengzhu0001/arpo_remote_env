@@ -155,6 +155,21 @@ class DataParallelPPOActor(BasePPOActor):
     def _optimizer_step(self) -> torch.Tensor:
         if isinstance(self.actor_module, FSDP):
             grad_norm = self.actor_module.clip_grad_norm_(self.config.max_grad_norm)
+            # Ensure optimizer states are on the same device as parameters before step
+            # When FSDP CPU offload is enabled, parameters are moved to GPU during forward/backward,
+            # but optimizer states might have been loaded to GPU separately, causing device mismatch
+            if self.actor_optimizer is not None:
+                # Synchronize optimizer state device with parameter device
+                # FSDP manages parameter placement, so we ensure optimizer states match
+                for param_group in self.actor_optimizer.param_groups:
+                    for param in param_group["params"]:
+                        if param.grad is not None:
+                            param_device = param.device
+                            state = self.actor_optimizer.state[param]
+                            for key, value in state.items():
+                                if isinstance(value, torch.Tensor) and value.device != param_device:
+                                    # Move optimizer state tensor to match parameter device
+                                    state[key] = value.to(param_device, non_blocking=True)
         else:
             grad_norm = nn.utils.clip_grad_norm_(self.actor_module.parameters(), max_norm=self.config.max_grad_norm)
 
