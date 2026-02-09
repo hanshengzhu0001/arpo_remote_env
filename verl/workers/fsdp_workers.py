@@ -199,6 +199,17 @@ class FSDPWorker(Worker):
         if (not fsdp_config.enable_rank0_init) or self.device_mesh.get_local_rank("fsdp") == 0:
             # Avoid Transformers' caching_allocator_warmup on CUDA, which can allocate large
             # temporary buffers and trigger OOM during model load on multi-GPU smoke tests.
+            try:
+                from transformers import modeling_utils as _hf_modeling_utils
+
+                if hasattr(_hf_modeling_utils, "caching_allocator_warmup"):
+                    _hf_modeling_utils.caching_allocator_warmup = (  # type: ignore[assignment]
+                        lambda *args, **kwargs: None
+                    )
+            except Exception:
+                # Best-effort: if the API changes, we just skip patching and fall back to default behavior.
+                pass
+
             model = auto_class.from_pretrained(
                 model_config.model_path,
                 config=self.model_config,
@@ -207,7 +218,6 @@ class FSDPWorker(Worker):
                 device_map="cpu" if fsdp_config.enable_rank0_init else "cuda",
                 low_cpu_mem_usage=True,
                 trust_remote_code=model_config.trust_remote_code,
-                caching_allocator_warmup=False,
             )
         else:
             with no_init_weights(), init_empty_weights():
