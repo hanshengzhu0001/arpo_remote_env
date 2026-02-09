@@ -104,8 +104,61 @@ def _patch_docker_provider_ports() -> None:
         raise RuntimeError(f"No available ports found starting from {start_port}")
 
     DockerProvider._get_available_port = _get_available_port  # type: ignore[attr-defined]
+
+    # macOS (and some hosts) have no /dev/kvm; container.start() fails if we pass devices=["/dev/kvm"].
+    # Patch start_emulator to only add /dev/kvm when it exists (use software emulation otherwise).
+    _orig_start = DockerProvider.start_emulator
+    _filelock = __import__("filelock", fromlist=["FileLock"]).FileLock
+    _prov_logger = __import__("desktop_env.providers.docker.provider", fromlist=["logger"]).logger
+
+    def _start_emulator_no_kvm_if_missing(self, path_to_vm: str, headless: bool, os_type: str, name=None):
+        lock = _filelock(str(self.lock_file))
+        try:
+            with lock:
+                self.vnc_port = self._get_available_port(8006)
+                self.server_port = self._get_available_port(5000)
+                self.chromium_port = self._get_available_port(9222)
+                self.vlc_port = self._get_available_port(8080)
+                devices = ["/dev/kvm"] if os.path.exists("/dev/kvm") else []
+                if not devices:
+                    _prov_logger.warning("/dev/kvm not found (e.g. on macOS); running VM with software emulation (slower).")
+                self.container = self.client.containers.run(
+                    "happysixd/osworld-docker",
+                    environment=self.environment,
+                    cap_add=["NET_ADMIN"],
+                    devices=devices,
+                    volumes={
+                        os.path.abspath(path_to_vm): {"bind": "/System.qcow2", "mode": "ro"}
+                    },
+                    ports={
+                        8006: self.vnc_port,
+                        5000: self.server_port,
+                        9222: self.chromium_port,
+                        8080: self.vlc_port
+                    },
+                    detach=True,
+                )
+            _prov_logger.info(
+                "Started container with ports - VNC: %s, Server: %s, Chrome: %s, VLC: %s",
+                self.vnc_port, self.server_port, self.chromium_port, self.vlc_port
+            )
+            self._wait_for_vm_ready()
+        except Exception as e:
+            import traceback
+            print("Exception:", e)
+            print("Traceback:", traceback.format_exc())
+            if self.container:
+                try:
+                    self.container.stop()
+                    self.container.remove()
+                except Exception:
+                    pass
+                self.container = None
+            raise e
+
+    DockerProvider.start_emulator = _start_emulator_no_kvm_if_missing  # type: ignore[attr-defined]
     DockerProvider._ARPO_PORT_PATCHED = True  # type: ignore[attr-defined]
-    logger.info("Docker provider patched successfully (no psutil).")
+    logger.info("Docker provider patched successfully (no psutil; /dev/kvm optional for macOS).")
 
 # --- Server state: one env ---
 env: DesktopEnv | None = None
