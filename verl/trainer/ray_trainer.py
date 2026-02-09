@@ -998,9 +998,14 @@ class RayPPOTrainer:
                             f"reward/{key}": value for key, value in reduce_metrics(reward_metrics).items()
                         }
                         metrics.update(reward_metrics)
-                    
-                        eval_results_global_np = batch.batch["eval_results"].reshape(-1, rollout_n)
-                        format_rewards_np = batch.batch["format_rewards"].reshape(-1, rollout_n)
+
+                        n_batch = len(batch)
+                        if n_batch % rollout_n == 0 and n_batch >= rollout_n:
+                            eval_results_global_np = batch.batch["eval_results"].reshape(-1, rollout_n)
+                            format_rewards_np = batch.batch["format_rewards"].reshape(-1, rollout_n)
+                        else:
+                            eval_results_global_np = batch.batch["eval_results"].reshape(-1, 1)
+                            format_rewards_np = batch.batch["format_rewards"].reshape(-1, 1)
                         print(f'Evaluation results:\n{eval_results_global_np}\nFormat rewards:\n{format_rewards_np}')
                         print('Global eval_results: ', sum(reward_tensor.tolist())/len(batch))
                     
