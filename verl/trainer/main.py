@@ -16,8 +16,10 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 """
 
 import json
+import os
 
 import ray
+from ray.exceptions import RayActorError
 from omegaconf import OmegaConf
 
 from ..single_controller.ray import RayWorkerGroup
@@ -82,6 +84,9 @@ class Runner:
         )
         trainer.init_workers()
         trainer.fit()
+        # Exit immediately without Python/vLLM teardown to avoid segmentation fault
+        # (vLLM/CUDA cleanup during normal exit can segfault). Main will get RayActorError.
+        os._exit(0)
 
 
 def main():
@@ -109,8 +114,10 @@ def main():
     runner = Runner.remote()
     try:
         ray.get(runner.run.remote(ppo_config))
+    except RayActorError:
+        # Runner called os._exit(0) after fit() to avoid vLLM teardown segfault; treat as success
+        pass
     finally:
-        # Orderly shutdown to avoid segfault during process exit (vLLM/Ray teardown)
         ray.shutdown()
 
 
