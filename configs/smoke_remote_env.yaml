@@ -1,8 +1,13 @@
-# Smoke test with REMOTE env (Mac or AWS CPU). Cluster runs training; env runs on remote server.
-# Aligned with smoke_4gpu.yaml (4 GPUs) except: 1 remote env, rollout_batch_size 1.
-# 1) On Mac: python scripts/remote_env_server.py
-# 2) Set env.remote_server_url to your Mac's URL (e.g. http://YOUR_MAC_IP:5001)
-# 3) Run on cluster: python -m verl.trainer.main config=configs/smoke_remote_env.yaml
+# Remote env: EXECUTIONS on VMware (Mac), TRAINING on cluster.
+# Use when the cluster can reach the Mac directly (same network/VPN).
+#
+# Architecture:
+#   - Resource (GPUs, model, rollout): current cluster.
+#   - Executions (reset/step/evaluate): remote server on Mac with VMware (default on macOS).
+#
+# 1) On Mac: start env server (VMware default): uvicorn ... --port 18082 (or 15001)
+# 2) Set env.remote_server_url to your Mac's URL (e.g. http://YOUR_MAC_IP:18082)
+# 3) On cluster: python -m verl.trainer.main config=configs/smoke_remote_env.yaml
 
 data:
   train_files: evaluation_examples/test_smoke_4.json
@@ -95,12 +100,13 @@ worker:
 env:
   num_envs: 1  # One remote server = one env (smoke_4gpu uses 4)
   max_steps: 16
-  remote_server_url: "http://35.212.237.174:15001"
+  remote_server_url: "http://YOUR_MAC_IP:18082"  # Mac running env server with VMware
 
 trainer:
   total_episodes: 10
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
   experiment_name: uitars_2b_remote_env
+  wandb_entity: hanszhu05-university-of-pennsylvania
   n_gpus_per_node: 4
   nnodes: 1

@@ -1,14 +1,20 @@
-# Same as smoke_remote_env.yaml but for SSH REVERSE TUNNEL (cluster can't reach Mac directly).
-# Use this when the cluster cannot ping/curl your Mac (e.g. different VPN/subnet).
+# Remote env: EXECUTIONS on VMware (Mac), TRAINING on cluster.
+# Use this when the cluster cannot reach the Mac directly (e.g. different VPN/subnet).
+#
+# Architecture:
+#   - Resource (GPUs, model, rollout): current cluster.
+#   - Executions (reset/step/evaluate): remote server on Mac with VMware (default on macOS).
 #
 # Setup:
-#   1. On Mac: start env server:  python scripts/remote_env_server.py
-#   2. On Mac: open tunnel to cluster (keeps running):
-#        ssh -R 15001:localhost:15001 kevinzyz@<CLUSTER_IP_or_HOSTNAME>
-#   3. On cluster: run this config:
+#   1. On Mac (VMware Fusion + OSWorld VM): start env server (VMware is default on macOS):
+#        cd ~/arpo_remote_env && source arpo_env/bin/activate
+#        python -m uvicorn scripts.remote_env_server:app --host 127.0.0.1 --port 18082
+#   2. On Mac: open reverse tunnel to cluster (leave running):
+#        ssh -R 15001:127.0.0.1:18082 kevinzyz@<CLUSTER_HOST>
+#   3. On cluster: run training (resource = cluster):
 #        python -m verl.trainer.main config=configs/smoke_remote_env_tunnel.yaml
 #
-# The tunnel forwards cluster's localhost:15001 -> Mac's localhost:15001.
+# Tunnel: cluster localhost:15001 -> Mac localhost:18082.
 
 data:
   train_files: evaluation_examples/test_smoke_4.json
@@ -101,7 +107,7 @@ worker:
 env:
   num_envs: 1
   max_steps: 16
-  remote_server_url: "http://127.0.0.1:15001"  # SSH tunnel forwards cluster localhost -> Mac
+  remote_server_url: "http://127.0.0.1:15001"  # tunnel: cluster:15001 -> Mac:18082 (VMware env)
 
 trainer:
   total_episodes: 10
