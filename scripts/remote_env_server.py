@@ -14,6 +14,7 @@ for p in (repo_root, osworld_root):
         sys.path.insert(0, str(p))
 
 import base64
+import os
 import traceback
 from io import BytesIO
 
@@ -69,6 +70,13 @@ def _build_init_messages(screenshot_bytes: bytes, instruction_text: str) -> list
 def _get_env():
     global env
     if env is None:
+        # Check KVM availability for logging
+        kvm_available = os.path.exists("/dev/kvm")
+        if kvm_available:
+            print("✓ KVM detected: /dev/kvm exists - VM will use hardware acceleration")
+        else:
+            print("⚠ KVM not found: /dev/kvm does not exist - VM will use software emulation (slower)")
+        
         try:
             env = DesktopEnv(
                 provider_name="docker",
@@ -79,6 +87,7 @@ def _get_env():
                 os_type="Ubuntu",
                 require_a11y_tree=False,
             )
+            print(f"DesktopEnv initialized successfully (KVM: {kvm_available})")
         except HTTPException:
             raise
         except Exception as e:
@@ -161,8 +170,10 @@ def env_step(body: StepRequest):
             prediction, action_parse_res_factor, obs_image_height, obs_image_width, model_type, max_pixels, min_pixels
         )
         actions = []
+        action_types = []
         for pr in parsed_responses:
             if "action_type" in pr:
+                action_types.append(pr["action_type"])
                 if pr["action_type"] == FINISH_WORD:
                     actions = ["DONE"]
                     break
@@ -171,7 +182,21 @@ def env_step(body: StepRequest):
                     break
             code = parsing_response_to_pyautogui_code(pr, obs_image_height, obs_image_width, False)
             actions.append(code)
-        format_reward = 0.0
+        
+        # ARPO-style format_reward heuristics:
+        # - Base reward for successful parsing (0.1)
+        # - Bonus for meaningful actions (clicks, types, etc.) vs DONE/WAIT (0.05)
+        # - Penalty for parse errors (-1.0)
+        format_reward = 0.1  # Base reward for successful LLM action parsing
+        
+        # Check if we have meaningful GUI actions (not just DONE/WAIT/FAIL)
+        if actions and actions[0] not in ["DONE", "WAIT", "FAIL"]:
+            format_reward += 0.05  # Bonus for executable GUI actions
+        
+        # Check for FINISH_WORD (task completion signal from LLM)
+        if FINISH_WORD in action_types:
+            format_reward += 0.1  # Bonus for LLM indicating task completion
+        
     except Exception:
         print("Parse action error:", prediction)
         print(traceback.format_exc())
@@ -180,6 +205,7 @@ def env_step(body: StepRequest):
 
     env.unpause()
     obs = None
+    step_successful = False
     for action in actions:
         obs, reward, step_done, info = env.step(action, pause=0.5)
         if step_done:
@@ -189,9 +215,19 @@ def env_step(body: StepRequest):
             is_done = True
         if is_done:
             break
+        # Check if step executed successfully (obs is valid)
+        if obs is not None and obs.get("screenshot") is not None:
+            step_successful = True
+    
     env.pause()
+    
+    # Enhance format_reward based on step execution success
+    if step_successful:
+        format_reward += 0.05  # Bonus for successful step execution (screenshot obtained)
+    
     if obs is None and not actions:
         is_done = True
+        format_reward = max(format_reward - 0.1, -1.0)  # Penalty for no observation
 
     history_messages.append({"role": "assistant", "content": [{"type": "text", "text": add_box_token(prediction)}]})
 
@@ -200,6 +236,7 @@ def env_step(body: StepRequest):
 
     if obs is None or obs.get("screenshot") is None:
         is_done = True
+        format_reward = max(format_reward - 0.1, -1.0)  # Penalty for missing screenshot
         return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
 
     screenshot = obs["screenshot"]
@@ -243,7 +280,16 @@ def env_history_messages():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Health check endpoint that also reports KVM status."""
+    kvm_available = os.path.exists("/dev/kvm")
+    env_status = "initialized" if env is not None else "not_initialized"
+    return {
+        "status": "ok",
+        "kvm_available": kvm_available,
+        "kvm_device": "/dev/kvm" if kvm_available else None,
+        "env_status": env_status,
+        "message": "KVM hardware acceleration enabled" if kvm_available else "KVM not available, using software emulation"
+    }
 
 
 if __name__ == "__main__":
