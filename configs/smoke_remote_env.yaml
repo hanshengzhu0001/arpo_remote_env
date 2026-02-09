@@ -31,7 +31,8 @@ algorithm:
 worker:
   actor:
     global_batch_size: 4  # Match smoke_4gpu; must be >= n_gpus_per_node for FSDP
-    micro_batch_size_per_device_for_update: 1   # smoke_4gpu uses 2 but per_device=1 here
+    # Must equal global_batch_size_per_device (4*rollout.n//4=2) when using FSDP CPU offload
+    micro_batch_size_per_device_for_update: 2
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
     padding_free: false
