@@ -115,11 +115,13 @@ def main():
     try:
         ray.get(runner.run.remote(ppo_config))
     except (RayActorError, RayTaskError) as e:
-        # Runner died: either (1) normal exit via os._exit(0) after fit(), or
+        # Runner died: (1) normal exit via os._exit(0) after fit() completes, or
         # (2) unexpected death (OOM, SIGSEGV). Exit immediately without
         # ray.shutdown() to avoid segmentation fault during cleanup.
         if isinstance(e, RayTaskError) and e.cause is not None:
             print(f"Runner worker died: {e.cause}")
+        else:
+            print("Runner exited (normal after fit() or worker crash). Exiting cleanly.")
         os._exit(0)
     finally:
         try:

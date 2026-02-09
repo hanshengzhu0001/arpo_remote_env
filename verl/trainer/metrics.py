@@ -42,6 +42,8 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
     prompt_length = prompt_mask.sum(-1).float()
     response_length = response_mask.sum(-1).float()
     num_images = (batch.batch["input_ids"] == 151655).bool().sum(-1).float() // 2691  # image_pad
+    # Avoid div-by-zero when batch has no image tokens (e.g. empty rollouts after failed reset)
+    num_images = torch.clamp(num_images, min=1.0)
     response_length = response_length / num_images  # average response length per action
 
     valid_adv = torch.masked_select(advantages, response_mask)

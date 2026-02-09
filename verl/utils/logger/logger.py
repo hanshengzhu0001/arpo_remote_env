@@ -101,11 +101,14 @@ class TensorBoardLogger(Logger):
 
 class WandbLogger(Logger):
     def __init__(self, config: Dict[str, Any]) -> None:
-        wandb.init(
+        init_kwargs = dict(
             project=config["trainer"]["project_name"],
             name=config["trainer"]["experiment_name"],
             config=config,
         )
+        if config["trainer"].get("wandb_entity"):
+            init_kwargs["entity"] = config["trainer"]["wandb_entity"]
+        wandb.init(**init_kwargs)
 
     def log(self, data: Dict[str, Any], step: int) -> None:
         wandb.log(data=data, step=step)

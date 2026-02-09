@@ -882,9 +882,13 @@ class RayPPOTrainer:
 
                             print('prepare_vllm_inputs_time: ', timing_raw['prepare_vllm_inputs'])
                             if vllm_batch is None or not isinstance(vllm_batch, DataProto):
-                                # No valid env outputs (e.g. remote env 500). Skip generation for this batch.
+                                # No valid env outputs: reset returned obs_messages=None (e.g. remote env failed, no screenshot).
                                 batch_skipped = True
                                 format_rewards = [0.0] * len(task_configs)
+                                print(
+                                    "prepare_vllm_inputs: no valid obs_messages (all envs returned None). "
+                                    "Remote reset must return obs_messages with screenshot; check remote server."
+                                )
                                 break
                             vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, num_workers)
 
@@ -899,6 +903,10 @@ class RayPPOTrainer:
                             action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
 
                             response_texts = self.tokenizer.batch_decode(action_batch_output.batch['responses'], skip_special_tokens=True)
+                            # On-policy: these are the actual model outputs sent to env; batch for GRPO comes from get_train_dict (same trajectory)
+                            if response_texts:
+                                sample = (response_texts[0] or "")[:80].replace("\n", " ")
+                                print(f"on_policy: model output for env step (preview): {sample!r}")
 
                             cur_valid_envs = [self.env_workers[i] for i in valid_env_idx]
                             with _timer("env_step", timing_raw):
@@ -939,6 +947,8 @@ class RayPPOTrainer:
                         # eval_results = ray.get(eval_results)
                     print('evaluate_env_time: ', timing_raw['evaluate_env'])
                     
+                    # On-policy: get_train_dict returns input_ids/labels from each worker's history_messages,
+                    # which include the model's responses sent to env step above. So the batch is the actual rollout.
                     with _timer("prepare_grpo_inputs", timing_raw):
                         process_results = ray.get([worker.get_train_dict.remote() for worker in self.env_workers])
                         batch = collate_fn_dataproto(process_results)
@@ -958,11 +968,21 @@ class RayPPOTrainer:
 
                     print('prepare_grpo_inputs_time: ', timing_raw['prepare_grpo_inputs'], '| batch size: ', len(batch))
 
+                    # Skip update when batch has no valid tokens (e.g. remote reset returned obs_messages=None)
+                    num_valid_tokens = batch.batch["attention_mask"].sum().item()
+                    if num_valid_tokens == 0 or batch.batch["input_ids"].size(-1) == 0:
+                        print(
+                            "Skipping PPO update: batch has no valid tokens (num_valid_tokens=0 or seq_len=0). "
+                            "Check remote env: reset should return obs_messages with screenshot."
+                        )
+                        continue
+
                     # compute global_valid tokens
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
 
-                    # compute reward
+                    # compute reward (eval_results = task success 0/1 from remote env.evaluate(); format_rewards = parse/step bonuses)
+                    # eval 0.0 is expected until the policy learns; format_reward gives signal for parse success and meaningful actions
                     with _timer("reward", timing_raw):
                         # self.save_rollout_trajectories(action_batch_output, history_messages_global, eval_results_global, task_conf
                         rewards = batch.batch["eval_results"] + 0.5 * batch.batch["format_rewards"]
@@ -975,14 +995,25 @@ class RayPPOTrainer:
                         valid_task_id_set = set()
 
                         reward_stds_list = []
+                        reward_n_per_task = []
                         for task_id in task_id_set:
                             reward_in_group = batch.batch["rewards"][batch.non_tensor_batch["task_id"] == task_id]
+                            n = reward_in_group.numel()
+                            reward_n_per_task.append(n)
                             # std undefined for 0 or 1 element; use 0.0 to avoid nan and UserWarning
-                            reward_std = 0.0 if reward_in_group.numel() <= 1 else reward_in_group.std().item()
+                            reward_std = 0.0 if n <= 1 else reward_in_group.std().item()
                             reward_stds_list.append(reward_std)
 
-                        num_invalid_group = len([x_std for x_std in reward_stds_list if x_std < 0.01])
-                        print(f"num_invalid_group: {num_invalid_group}/{len(reward_stds_list)} | reward_stds_list: {reward_stds_list}")
+                        # With 1 env/task we have 1 sample per task → reward_std=0 by definition; don't mark as invalid.
+                        # Only mark invalid when we have multiple samples per task and std < 0.01 (no variance).
+                        num_invalid_group = sum(
+                            1 for i, x_std in enumerate(reward_stds_list)
+                            if reward_n_per_task[i] > 1 and x_std < 0.01
+                        )
+                        print(
+                            f"num_invalid_group: {num_invalid_group}/{len(reward_stds_list)} "
+                            f"(n_per_task: {reward_n_per_task}) | reward_stds_list: {reward_stds_list}"
+                        )
 
                         # we combine with rule-based rm
                         reward_tensor = batch.batch["rewards"]
