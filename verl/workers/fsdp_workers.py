@@ -250,10 +250,23 @@ class FSDPWorker(Worker):
             else:
                 self.print_rank0("No vision tower found.")
 
-        # Clear CUDA cache before barrier to avoid OOM from any stray allocations
+        # Clear CUDA cache aggressively before barrier to avoid OOM from any stray allocations.
+        # Skip print statements that might trigger CUDA operations before barrier.
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        dist.barrier()
+            torch.cuda.synchronize()  # Ensure all CUDA ops complete before barrier
+        # Barrier can fail with CUDA OOM if any rank has memory issues; wrap in try/except
+        # to provide better error context, but still fail if OOM occurs.
+        try:
+            dist.barrier()
+        except RuntimeError as e:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            raise RuntimeError(
+                f"dist.barrier() failed (possibly CUDA OOM). "
+                f"Model is on CPU: {next(model.parameters()).device}. "
+                f"Try reducing model size or enabling CPU offload."
+            ) from e
         print_model_size(model)
         print_gpu_memory_usage("After huggingface model init")
         mixed_precision = MixedPrecision(

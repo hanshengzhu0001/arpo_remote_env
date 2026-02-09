@@ -57,7 +57,8 @@ worker:
       enable_rank0_init: false
     offload:
       offload_params: false
-      offload_optimizer: false
+      # Enable optimizer CPU offload to reduce GPU memory pressure during init
+      offload_optimizer: true
 
   rollout:
     temperature: 0.7
