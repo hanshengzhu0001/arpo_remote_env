@@ -32,7 +32,7 @@ import random
 import ray
 import torch
 from codetiming import Timer
-from ray.experimental.tqdm_ray import tqdm
+from tqdm import tqdm  # standard tqdm to avoid segfault in ray.experimental.tqdm_ray teardown
 from torch.utils.data import RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizer, ProcessorMixin
