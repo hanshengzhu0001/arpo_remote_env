@@ -1,116 +1,107 @@
-# ARPO Replication
+# arpo_remote_env
 
-Complete ARPO (Agentic Replay Policy Optimization) replication with OSWorld integration.
+ARPO (Agentic Replay Policy Optimization) with OSWorld and **remote env** support: run the environment on a Mac (or CPU server) and training on a GPU cluster over HTTP, with an optional SSH tunnel when the cluster cannot reach the Mac directly.
 
-**Status**: ✅ Ready for Evaluation & Training
-
----
-
-## 🚀 Quick Start
-
-### Evaluation (GPU Inference on 10 Chrome Tasks)
-
-1. **Colab**: Run `notebooks/GPU_Server_for_OSWorld.ipynb` (A100 GPU)
-2. **Mac**: Run `notebooks/ARPO_OSWorld_Evaluation.ipynb`
-3. **Expected**: ~45 minutes, 10 tasks evaluated
-
-### Training (VERL on GPU Cluster)
-
-1. **Setup SSH**: Follow `REMOTE_GPU_SETUP.md`
-2. **Run**: `notebooks/ARPO_Smoke_Test.ipynb` (4 tasks, ~1 hour)
-3. **Scale up**: 32 or 128 tasks after verification
+**Repo:** [github.com/hanshengzhu0001/arpo_remote_env](https://github.com/hanshengzhu0001/arpo_remote_env)
 
 ---
 
-## 📁 Repository Structure
+## Quick start
 
-```
-arpo_replica/
-├── notebooks/
-│   ├── ARPO_Smoke_Test.ipynb           # 4-task VERL training test
-│   ├── ARPO_OSWorld_Evaluation.ipynb   # 10-task evaluation
-│   ├── GPU_Server_for_OSWorld.ipynb    # GPU inference server
-│   └── arpo_training_notebook.ipynb    # Training guide
-├── test_data/osworld_examples/
-│   ├── train_smoke_4.json              # 4 tasks for testing
-│   ├── train_subset_32.json            # 32 tasks
-│   ├── train_all_128.json              # Full dataset
-│   └── test_chrome_10.json             # 10 Chrome evaluation tasks
-├── configs/
-│   ├── config_uitars_2b_mac.yaml       # Training configuration
-│   └── wandb_config.yaml               # W&B logging
-├── osworld_patches/                     # Modified OSWorld files
-├── scripts/                             # Training scripts
-└── docs/                                # Additional documentation
+### 1. Clone and submodules
+
+```bash
+git clone https://github.com/hanshengzhu0001/arpo_remote_env.git
+cd arpo_remote_env
+git submodule update --init --recursive
 ```
 
----
+### 2. Smoke test (two options)
 
-## 📊 Performance Results
+**Option A – All on cluster (local envs)**  
+Uses Docker + VMs on the cluster. No Mac needed.
 
-**Evaluation** (ARPO UITARS 7B on A100):
-- 10 Chrome tasks: ~45 minutes
-- Per task: ~4.5 minutes
-- Success rate: 20% (1/5 initial test)
-
-**Training** (UI-TARS-2B):
-- CPU: ~60 min/step (not practical)
-- GPU: ~10-30 sec/step (practical!)
-
----
-
-## 📖 Documentation
-
-- **`README.md`** - This file (start here)
-- **`REMOTE_GPU_SETUP.md`** - SSH setup for GPU cluster
-- **`TRAINING_PROGRESSION.md`** - Stage 1-3 training plan
-- **`SETUP_FOR_NEW_USERS.md`** - Complete setup from scratch
-- **`PIPELINE_VERIFICATION.md`** - Confirms same pipeline as paper
-- **`docs/`** - Additional guides
-
----
-
-## 🎯 Dataset
-
-- **128 total tasks** across 10 domains
-- **18 Chrome tasks** (+ 18 noisy versions)
-- Format: OSWorld evaluation_examples compatible
-
-From: [arpo_replica/data branch](https://github.com/gowathena/arpo_replica/tree/data)
-
----
-
-## 🔧 Models
-
-- **UI-TARS-2B**: ByteDance-Seed/UI-TARS-2B-SFT (evaluation/training)
-- **ARPO UITARS 7B**: Fanbin/ARPO_UITARS1.5_7B (evaluation)
-
----
-
-## ⚙️ Requirements
-
-- Python 3.10
-- For Mac: VMware Fusion
-- For Colab/Cluster: Docker
-- For training: GPU (A100, A40, or T4)
-
----
-
-## 🔗 Links
-
-- **Paper**: [arXiv:2505.16282](https://arxiv.org/abs/2505.16282)
-- **Original**: [JIA-Lab-research/ARPO](https://github.com/JIA-Lab-research/ARPO)
-- **OSWorld**: [xlang-ai/OSWorld](https://github.com/xlang-ai/OSWorld)
-
----
-
-## 📝 Citation
-
-```bibtex
-@article{lu2025arpo,
-  title={ARPO: End-to-End Policy Optimization for GUI Agents with Experience Replay},
-  author={Fanbin Lu and Zhisheng Zhong and Shu Liu and Chi-Wing Fu and Jiaya Jia},
-  journal={arXiv},
-  year={2025}
-}
+```bash
+cd arpo_remote_env
+pip install -r requirements.txt   # and GPU deps (vllm, etc.) as needed
+ray stop   # if an old Ray cluster is running
+python -m verl.trainer.main config=configs/smoke_4gpu.yaml
 ```
+
+**Option B – Remote env (Mac + cluster)**  
+Env runs on your Mac; cluster runs training and talks to the Mac over HTTP (direct or SSH tunnel).
+
+**On the Mac:**
+
+```bash
+cd arpo_remote_env
+python3 -m venv arpo_env && source arpo_env/bin/activate
+pip install -r requirements.txt   # skip GPU-only packages if needed
+python scripts/remote_env_server.py
+```
+
+Leave that running (server on port **5001**).
+
+**On the cluster:**
+
+- If the cluster **can** reach your Mac (same VPN/network): set `env.remote_server_url` in `configs/smoke_remote_env.yaml` to `http://YOUR_MAC_IP:5001`, then:
+  ```bash
+  python -m verl.trainer.main config=configs/smoke_remote_env.yaml
+  ```
+- If the cluster **cannot** reach your Mac: use an SSH reverse tunnel. On the Mac (with the env server already running): `ssh -R 5001:localhost:5001 USER@CLUSTER_HOST`. On the cluster: `curl http://127.0.0.1:5001/health` then:
+  ```bash
+  python -m verl.trainer.main config=configs/smoke_remote_env_tunnel.yaml
+  ```
+
+Full details: [scripts/README_remote_env_server.md](scripts/README_remote_env_server.md).
+
+---
+
+## Configs
+
+| Config | Use case |
+|--------|----------|
+| `configs/smoke.yaml` | 1 GPU, 2 envs, ~1 h |
+| `configs/smoke_4gpu.yaml` | 4 GPUs, 4 envs, ~25–30 min |
+| `configs/smoke_8gpu.yaml` | 8 GPUs, 8 envs |
+| `configs/smoke_remote_env.yaml` | Remote env (Mac IP in config) |
+| `configs/smoke_remote_env_tunnel.yaml` | Remote env via SSH tunnel (127.0.0.1:5001) |
+
+Data paths use `OSWorld/evaluation_examples/test_smoke_4.json` (4 tasks). Set `env.remote_server_url` to your Mac’s URL when using remote env without tunnel.
+
+---
+
+## Layout
+
+```
+arpo_remote_env/
+├── configs/           # Training configs (smoke, remote env, tunnel)
+├── scripts/
+│   ├── remote_env_server.py   # Run on Mac for Option B
+│   └── README_remote_env_server.md
+├── verl/              # VERL trainer + RemoteEnvWorker
+├── OSWorld/           # Submodule (desktop_env, evaluators)
+├── notebooks/         # Cluster_Smoke_Test, evaluation, etc.
+└── requirements.txt
+```
+
+---
+
+## Requirements
+
+- Python 3.10+
+- GPU cluster: Ray, PyTorch, vLLM, transformers; see `requirements.txt`
+- Remote env server: FastAPI, uvicorn, OSWorld/desktop_env deps
+- For local envs on cluster: Docker (+ VM image per OSWorld docs)
+
+---
+
+## Links
+
+- **Paper:** [ARPO: End-to-End Policy Optimization for GUI Agents with Experience Replay](https://arxiv.org/abs/2505.16282)
+- **ARPO:** [JIA-Lab-research/ARPO](https://github.com/JIA-Lab-research/ARPO)
+- **OSWorld:** [xlang-ai/OSWorld](https://github.com/xlang-ai/OSWorld)
+
+## License
+
+Apache-2.0
