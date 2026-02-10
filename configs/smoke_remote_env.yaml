@@ -1,12 +1,16 @@
-# Remote env: EXECUTIONS on VMware (Mac), TRAINING on cluster.
-# Use when the cluster can reach the Mac directly (same network/VPN).
+# Remote env: EXECUTIONS on AWS OSWorld host, TRAINING on cluster.
+# Use when the cluster can reach the AWS EC2 host directly (public IP / allowed SG).
 #
 # Architecture:
 #   - Resource (GPUs, model, rollout): current cluster.
-#   - Executions (reset/step/evaluate): remote server on Mac with VMware (default on macOS).
+#   - Executions (reset/step/evaluate): remote server on AWS EC2 (Ubuntu + PROVIDER=aws).
 #
-# 1) On Mac: start env server (VMware default): uvicorn ... --port 18082 (or 15001)
-# 2) Set env.remote_server_url to your Mac's URL (e.g. http://YOUR_MAC_IP:18082)
+# 1) On AWS host (e.g. 34.227.191.7): start env server with AWS provider:
+#      ssh ubuntu@34.227.191.7
+#      cd ~/arpo_remote_env && source arpo_env/bin/activate
+#      export PROVIDER=aws
+#      python -m uvicorn scripts.remote_env_server:app --host 0.0.0.0 --port 15001
+# 2) On cluster: set env.remote_server_url below to http://34.227.191.7:15001
 # 3) On cluster: python -m verl.trainer.main config=configs/smoke_remote_env.yaml
 
 data:
@@ -98,9 +102,9 @@ worker:
     skip_special_tokens: true
 
 env:
-  num_envs: 1  # One remote server = one env (smoke_4gpu uses 4)
+  num_envs: 1  # Remote path uses 1 env when remote_server_url is set (rollout.n controls per-task samples)
   max_steps: 16
-  remote_server_url: "http://YOUR_MAC_IP:18082"  # Mac running env server with VMware
+  remote_server_url: "http://34.227.191.7:15001"  # AWS OSWorld host (Ubuntu + PROVIDER=aws)
 
 trainer:
   total_episodes: 10
