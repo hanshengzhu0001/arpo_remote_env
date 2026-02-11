@@ -5,12 +5,12 @@
 #   - Resource (GPUs, model, rollout): current cluster.
 #   - Executions (reset/step/evaluate): remote server on AWS EC2 (Ubuntu + PROVIDER=aws).
 #
-# 1) On AWS host (e.g. 34.227.191.7): start env server with AWS provider:
-#      ssh ubuntu@34.227.191.7
+# 1) On AWS host (e.g. 54.89.232.89): start env server with Docker provider:
+#      ssh ubuntu@54.89.232.89
 #      cd ~/arpo_remote_env && source arpo_env/bin/activate
-#      export PROVIDER=aws
+#      export DOCKER_VMS_DIR=/data/docker_vm_data  # Optional: use larger EBS volume
 #      python -m uvicorn scripts.remote_env_server:app --host 0.0.0.0 --port 15001
-# 2) On cluster: set env.remote_server_url below to http://34.227.191.7:15001
+# 2) On cluster: set env.remote_server_url below to http://54.89.232.89:15001
 # 3) On cluster: python -m verl.trainer.main config=configs/smoke_remote_env.yaml
 
 data:
@@ -104,7 +104,7 @@ worker:
 env:
   num_envs: 1  # Remote path uses 1 env when remote_server_url is set (rollout.n controls per-task samples)
   max_steps: 16
-  remote_server_url: "http://34.227.191.7:15001"  # AWS OSWorld host (Ubuntu + PROVIDER=aws)
+  remote_server_url: "http://54.89.232.89:15001"  # AWS OSWorld host (Ubuntu + Docker provider); SG allows cluster IP:15001
 
 trainer:
   total_episodes: 10
