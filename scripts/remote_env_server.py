@@ -217,6 +217,14 @@ def _get_env():
         if provider_name not in ("docker", "vmware"):
             provider_name = "docker"
         if provider_name == "docker":
+            if docker is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Docker provider requires the docker Python package. "
+                        "Install it: pip install docker. Then ensure the Docker daemon is running (e.g. Docker Desktop or system docker)."
+                    ),
+                )
             _patch_docker_provider_ports()
         # Check KVM availability for logging (Docker VM; VMware uses its own acceleration)
         kvm_available = os.path.exists("/dev/kvm")
@@ -244,7 +252,20 @@ def _get_env():
             print(f"  → VM is ready: screenshots will come from VM via controller.get_screenshot()")
         except HTTPException:
             raise
+        except OSError as e:
+            if e.errno == 28:  # No space left on device
+                print(f"Env init failed: {e}", flush=True)
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "No space left on device on the env server. Free disk space (e.g. docker system prune -a, "
+                        "remove cache_dirs/vms) or resize the EBS volume. Then restart the server."
+                    ),
+                ) from e
+            raise
         except Exception as e:
+            print(f"Env init failed: {type(e).__name__}: {e}", flush=True)
+            print(traceback.format_exc(), flush=True)
             is_docker_error = (
                 docker is not None
                 and isinstance(e, docker.errors.DockerException)
@@ -258,6 +279,8 @@ def _get_env():
                         f"Original error: {e}"
                     ),
                 ) from e
+            if isinstance(e, FileNotFoundError) and "SKIP_DOCKER_VM_DOWNLOAD" in str(e):
+                raise HTTPException(status_code=503, detail=str(e)) from e
             raise
     return env
 
@@ -423,23 +446,49 @@ def env_step(body: StepRequest):
     }
 
 
+def _env_ready_for_evaluate(env) -> bool:
+    """DesktopEnv with Docker provider only gets setup_controller after reset() calls _start_emulator()."""
+    try:
+        return getattr(env, "setup_controller", None) is not None
+    except Exception:
+        return False
+
+
 @app.post("/env/evaluate")
 def env_evaluate():
+    # Log immediately so server logs show evaluate was called (even if we 503 or return 0)
+    _instr = (instruction or "N/A")[:80]
+    print(f"POST /env/evaluate received (instruction={_instr!r}, step_counter={step_counter})")
     env = _get_env()
     try:
-        if not getattr(env, "setup_controller", None):
-            print("Evaluation skipped: env not fully started (no setup_controller); reset likely failed (e.g. psutil).")
-            return 0.0
+        if not _env_ready_for_evaluate(env):
+            print("Evaluation skipped: env not fully started (no setup_controller); reset likely failed. Returning 503 so client can retry.")
+            raise HTTPException(
+                status_code=503,
+                detail="Env not ready for evaluation (no setup_controller; reset may have failed). Client should retry.",
+            )
         env.unpause()
         score = env.evaluate()
         print(f"Evaluation completed: score={score}, instruction={instruction}, step_counter={step_counter}")
         return float(score)
+    except HTTPException:
+        raise
     except AttributeError as e:
         if "setup_controller" in str(e):
-            print("Evaluation skipped: env has no setup_controller (reset failed).")
-            return 0.0
+            print("Evaluation skipped: env has no setup_controller (reset failed). Returning 503 so client can retry.")
+            raise HTTPException(
+                status_code=503,
+                detail="Env not ready for evaluation (reset failed). Client should retry.",
+            ) from e
         raise
     except Exception as e:
+        err_msg = str(e)
+        if "setup_controller" in err_msg:
+            print("Evaluation skipped: env has no setup_controller (wrapped error). Returning 503 so client can retry.")
+            raise HTTPException(
+                status_code=503,
+                detail="Env not ready for evaluation (no setup_controller). Client should retry.",
+            ) from e
         print("Evaluation error:", e)
         print(traceback.format_exc())
         return 0.0

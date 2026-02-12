@@ -38,6 +38,27 @@ Server listens on `127.0.0.1:18082`. Keep this terminal open. You should see `St
 
 Tunnel maps cluster `localhost:15001` → Mac `localhost:18082`. Training config `smoke_remote_env_tunnel.yaml` already uses `http://127.0.0.1:15001`.
 
+## 3. On Linux / AWS (env server – Docker + KVM)
+
+To **fix 503** and **use KVM** when the env server runs on Linux (e.g. AWS):
+
+1. **Install the Docker Python package** (required for the Docker provider):
+   ```bash
+   pip install docker
+   ```
+2. **Ensure the Docker daemon is running** (Docker Engine or Docker Desktop).
+3. **Use KVM acceleration:** Run the server on a host that has `/dev/kvm` (e.g. most AWS EC2 instance types). The server checks for `/dev/kvm` at startup and passes it into the OSWorld container when present; you’ll see `✓ KVM detected` in the logs. If you see `⚠ KVM not found`, the VM will use software emulation (slower).
+
+```bash
+# On the Linux/AWS host (e.g. after SSH)
+cd /path/to/repo
+source .venv/bin/activate   # or your venv
+pip install docker         # if not already installed
+python -m uvicorn scripts.remote_env_server:app --host 0.0.0.0 --port 15001
+```
+
+Point the cluster at this host (e.g. `env.remote_server_url: "http://34.227.191.7:15001"`) and ensure the security group allows the cluster IP on port 15001.
+
 ## API (for debugging)
 
 - `POST /env/reset`  Body: `{"task_config": {...}}`  → `{env_idx, obs_messages, is_done, format_reward}`

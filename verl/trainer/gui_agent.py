@@ -1056,7 +1056,7 @@ class RemoteEnvWorker:
     REMOTE_RESET_TIMEOUT = 1200   # 20 min
     REMOTE_STEP_TIMEOUT = 300     # 5 min
     REMOTE_EVALUATE_TIMEOUT = 300  # 5 min
-    REMOTE_EVALUATE_RETRIES = 2
+    REMOTE_EVALUATE_RETRIES = 4   # 5 attempts total; 503/env-not-ready often transient
 
     def _post(self, path: str, json_body: dict, timeout=None):
         url = f"{self.remote_server_url}{path}"
@@ -1113,6 +1113,7 @@ class RemoteEnvWorker:
         }
 
     def evaluate(self):
+        import time
         last_err = None
         for attempt in range(self.REMOTE_EVALUATE_RETRIES + 1):
             try:
@@ -1123,8 +1124,10 @@ class RemoteEnvWorker:
             except Exception as e:
                 last_err = e
                 if attempt < self.REMOTE_EVALUATE_RETRIES:
-                    print(f"RemoteEnvWorker evaluate attempt {attempt + 1} failed: {e}, retrying...")
-        print(f"RemoteEnvWorker evaluate HTTP error: {last_err}")
+                    wait = 5 * (attempt + 1)  # 5s, 10s, 15s, 20s backoff
+                    print(f"RemoteEnvWorker evaluate attempt {attempt + 1} failed: {e}, retrying in {wait}s...")
+                    time.sleep(wait)
+        print(f"RemoteEnvWorker evaluate HTTP error (all retries exhausted): {last_err}. Returning 0.0.")
         return 0.0
 
     def get_history_messages(self):
