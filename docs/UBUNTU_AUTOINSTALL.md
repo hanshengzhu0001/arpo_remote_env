@@ -60,7 +60,7 @@ The installer runs unattended and skips the language and interactive screens.
    sudo apt update && sudo apt upgrade -y
    ```
 
-4. Set up shared folder and env server as in [REMOTE_ENV_TUNNEL_SETUP.md](REMOTE_ENV_TUNNEL_SETUP.md).
+4. Set up shared folder and env server as in [REMOTE_ENV_SERVER_RUNBOOK.md](REMOTE_ENV_SERVER_RUNBOOK.md).
 
 ## Summary
 

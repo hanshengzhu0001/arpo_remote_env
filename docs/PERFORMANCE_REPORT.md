@@ -203,7 +203,7 @@ All CPU optimizations were tested:
 - `test_single_task.sh` - Single task test
 
 ### Documentation
-- `START_HERE.md` - Quick start guide
+- `README.md` and `docs/REMOTE_ENV_SERVER_RUNBOOK.md` - Quick start and remote env
 - `TRAINING_GUIDE.md` - Complete training instructions
 - `PAPER_SUMMARY.md` - ARPO paper explanation
 - `TROUBLESHOOTING.md` - Problem solving

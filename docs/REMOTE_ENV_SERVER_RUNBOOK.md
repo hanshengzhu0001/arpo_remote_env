@@ -162,7 +162,16 @@ With the **xlang-ai/OSWorld** submodule, the desktop is launched from the **offi
 
 ### 5. Start the server
 
-**Required** for AWS provider (xlang-ai/OSWorld): `AWS_REGION`, `AWS_SUBNET_ID`, `AWS_SECURITY_GROUP_ID`. You can use a `.env` file in the server directory or export them:
+**Required** for AWS provider (xlang-ai/OSWorld): `AWS_REGION`, `AWS_SUBNET_ID`, `AWS_SECURITY_GROUP_ID`.
+
+**Option A – On EC2 (recommended):** use the start script; it auto-detects subnet and security group from the instance:
+
+```bash
+cd ~/arpo_remote_env && source arpo_env/bin/activate
+./scripts/start_remote_env_aws.sh
+```
+
+**Option B – Set by hand or via .env:** copy `.env.example` to `.env`, fill in your subnet and security group IDs, then:
 
 ```bash
 cd ~/arpo_remote_env && source arpo_env/bin/activate

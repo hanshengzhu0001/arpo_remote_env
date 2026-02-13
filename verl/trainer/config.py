@@ -92,6 +92,8 @@ class EnvConfig:
     num_envs: int = 32
     max_steps: int = 15
     screen_size: Tuple[int, int] = (1920, 1080)
+    # When set, trainer uses this URL for env (e.g. tunnel: http://127.0.0.1:15001)
+    remote_env_url: Optional[str] = None
 
 @dataclass
 class PPOConfig:
