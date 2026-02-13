@@ -1,17 +1,14 @@
-# Remote env: EXECUTIONS on AWS OSWorld host, TRAINING on cluster.
-# Use when the cluster can reach the AWS EC2 host directly (public IP / allowed SG).
+# Remote env: EXECUTIONS on AWS EC2 (xlang-ai/OSWorld, PROVIDER=aws), TRAINING on cluster.
+# Use when the cluster can reach the EC2 host (public IP + security group allows 15001).
 #
 # Architecture:
-#   - Resource (GPUs, model, rollout): current cluster.
-#   - Executions (reset/step/evaluate): remote server on AWS EC2 (Ubuntu + PROVIDER=aws).
+#   - Resource (GPUs, model, rollout): cluster.
+#   - Executions (reset/step/evaluate): remote server on EC2 (PROVIDER=aws); see docs/REMOTE_ENV_SERVER_RUNBOOK.md.
 #
-# 1) On AWS host (e.g. 100.48.93.208): start env server with Docker provider:
-#      ssh ubuntu@100.48.93.208
-#      cd ~/arpo_remote_env && source arpo_env/bin/activate
-#      export DOCKER_VMS_DIR=/data/docker_vm_data  # Optional: use larger EBS volume
-#      python -m uvicorn scripts.remote_env_server:app --host 0.0.0.0 --port 15001
-# 2) On cluster: set env.remote_server_url below to http://100.48.93.208:15001
+# 1) On EC2 (e.g. 100.48.93.208): cd ~/arpo_remote_env && source arpo_env/bin/activate && ./scripts/start_remote_env_aws.sh
+# 2) In this config: env.remote_server_url must be http://<EC2_IP>:15001 (e.g. http://100.48.93.208:15001)
 # 3) On cluster: python -m verl.trainer.main config=configs/smoke_remote_env.yaml
+# Note: Config key is remote_server_url (not remote_env_url).
 
 data:
   train_files: evaluation_examples/test_smoke_4.json
@@ -104,7 +101,8 @@ worker:
 env:
   num_envs: 1  # Remote path uses 1 env when remote_server_url is set (rollout.n controls per-task samples)
   max_steps: 16
-  remote_server_url: "http://100.48.93.208:15001"  # AWS OSWorld host (Ubuntu + Docker provider); SG allows cluster IP:15001
+  screen_size: [1920, 1080]
+  remote_server_url: "http://100.48.93.208:15001"  # EC2 IP where the server runs
 
 trainer:
   total_episodes: 10

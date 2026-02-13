@@ -1,5 +1,14 @@
 # Remote env: trainer flow and server logs
 
+## Training-side checklist (AWS EC2 remote server)
+
+- **Config key:** Use **`env.remote_server_url`** (not `remote_env_url`). Example: `remote_server_url: "http://100.48.93.208:15001"`.
+- **Config file:** e.g. `configs/smoke_remote_env.yaml`; run with `python -m verl.trainer.main config=configs/smoke_remote_env.yaml`.
+- **Connectivity:** EC2 security group must allow **inbound TCP 15001** from the training cluster. Verify from the cluster: `curl http://<EC2_IP>:15001/health` or `./scripts/verify_remote_env_connection.sh`.
+- **Server:** On EC2, start with `./scripts/start_remote_env_aws.sh` (or run uvicorn with `PROVIDER=aws` and required AWS env vars). See `docs/REMOTE_ENV_SERVER_RUNBOOK.md`. The server loads `.env` at startup so `OPENAI_API_KEY` (and AWS vars) are available for tasks; the start script in [arpo_remote_env](https://github.com/hanshengzhu0001/arpo_remote_env) also sources `.env` before starting.
+
+---
+
 ## Trainer order (reset → step → evaluate)
 
 The trainer **does** perform reset, then steps, then evaluate. Exact flow in `verl/trainer/ray_trainer.py`:

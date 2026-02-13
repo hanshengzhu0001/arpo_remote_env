@@ -18,6 +18,22 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 import json
 import os
 
+# Load .env from repo root so OPENAI_API_KEY etc. are available (e.g. for generation)
+def _load_dotenv():
+    try:
+        p = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+        if os.path.isfile(p):
+            with open(p) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip())
+    except Exception:
+        pass
+
+_load_dotenv()
+
 import ray
 from ray.exceptions import RayActorError, RayTaskError
 from omegaconf import OmegaConf

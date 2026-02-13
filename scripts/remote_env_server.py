@@ -20,6 +20,22 @@ for p in (repo_root, osworld_root):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
+
+def _load_dotenv():
+    """Load .env from repo root so OPENAI_API_KEY (and AWS_*, etc.) are available for tasks."""
+    try:
+        p = repo_root / ".env"
+        if p.is_file():
+            with open(p) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip())
+    except Exception:
+        pass
+
+
 import base64
 import logging
 import os
@@ -32,6 +48,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logger = logging.getLogger("uvicorn.error")
+
+# Load .env from repo root so OPENAI_API_KEY (and AWS_*, etc.) are available for OSWorld tasks
+_load_dotenv()
 
 # Unconditional print on import so we know this file is loaded (e.g. on Mac after git pull)
 print("[remote_env_server] module loaded", file=sys.stderr, flush=True)
