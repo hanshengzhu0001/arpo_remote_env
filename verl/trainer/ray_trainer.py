@@ -131,8 +131,11 @@ class ResourcePoolManager:
             [n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes]
         )
         if total_available_gpus < total_required_gpus:
+            per_node = ", ".join(f"{node}: {g} GPU(s)" for node, g in node_available_gpus.items())
             raise ValueError(
-                f"Total available GPUs {total_available_gpus} is less than total desired GPUs {total_required_gpus}."
+                f"Total available GPUs {total_available_gpus} is less than total desired GPUs {total_required_gpus}. "
+                f"Per-node (Ray view): {per_node}. "
+                f"Fix: start Ray with GPUs (e.g. ray start --head --num-gpus=8) or unset RAY_ADDRESS to start a new cluster that auto-detects GPUs."
             )
 
 
@@ -887,7 +890,10 @@ class RayPPOTrainer:
                                             _txt_len += len(c.get("text", ""))
                                 print(f"verify_obs: step={step_idx} messages={_n_msg} images={_n_img} instruction_text_len={_txt_len}")
                             else:
-                                print("verify_obs: step={} obs_messages is None (reset/step failed)".format(step_idx))
+                                _t = getattr(self, "_last_remote_fail_log", 0)
+                                if _t == 0 or time.time() - _t >= 30:
+                                    print("verify_obs: step={} obs_messages is None (reset/step failed). Remote env 503? (this message rate-limited to every 30s)".format(step_idx))
+                                    self._last_remote_fail_log = time.time()
 
                             num_workers = len(self.actor_rollout_wg._workers)
                             with _timer("prepare_vllm_inputs", timing_raw):
@@ -898,10 +904,13 @@ class RayPPOTrainer:
                                 # No valid env outputs: reset returned obs_messages=None (e.g. remote env failed, no screenshot).
                                 batch_skipped = True
                                 format_rewards = [0.0] * len(task_configs)
-                                print(
-                                    "prepare_vllm_inputs: no valid obs_messages (all envs returned None). "
-                                    "Remote reset must return obs_messages with screenshot; check remote server."
-                                )
+                                _t = getattr(self, "_last_remote_fail_log", 0)
+                                if _t == 0 or time.time() - _t >= 30:
+                                    print(
+                                        "prepare_vllm_inputs: no valid obs_messages (all envs returned None). "
+                                        "Remote reset must return obs_messages with screenshot; check remote server. (rate-limited 30s)"
+                                    )
+                                    self._last_remote_fail_log = time.time()
                                 break
                             vllm_batch_pad, pad_size = pad_dataproto_to_divisor(vllm_batch, num_workers)
 
@@ -993,10 +1002,13 @@ class RayPPOTrainer:
                     # Skip update when batch has no valid tokens (e.g. remote reset returned obs_messages=None)
                     num_valid_tokens = batch.batch["attention_mask"].sum().item()
                     if num_valid_tokens == 0 or batch.batch["input_ids"].size(-1) == 0:
-                        print(
-                            "Skipping PPO update: batch has no valid tokens (num_valid_tokens=0 or seq_len=0). "
-                            "Check remote env: reset should return obs_messages with screenshot."
-                        )
+                        _t = getattr(self, "_last_remote_fail_log", 0)
+                        if _t == 0 or time.time() - _t >= 30:
+                            print(
+                                "Skipping PPO update: batch has no valid tokens (remote env 503?). "
+                                "Check remote server; start server on EC2 if needed. (rate-limited 30s)"
+                            )
+                            self._last_remote_fail_log = time.time()
                         continue
 
                     # compute global_valid tokens
@@ -1072,56 +1084,33 @@ class RayPPOTrainer:
                         print("Skipping PPO update this step (empty batch).")
                         continue
 
-                    # recompute old_log_probs (pad when batch size not divisible by world_size)
+                    # Pad batch so it is divisible by actor world_size (required for chunking across workers)
+                    batch, update_pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
+
+                    # recompute old_log_probs
                     with _timer("old", timing_raw):
-                        if len(batch) % num_dp_workers != 0:
-                            batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
-                            old_log_probs = self.actor_rollout_wg.compute_log_probs(batch_dp)
-                            old_log_probs = unpad_dataproto(old_log_probs, pad_size)
-                        else:
-                            old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
+                        old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
                         batch = batch.union(old_log_probs)
+
+                    # compute ref_log_probs
+                    if self.use_reference_policy:
+                        with _timer("ref", timing_raw):
+                            ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
+                            batch = batch.union(ref_log_probs)
+
+                    # compute values
+                    if self.use_critic:
+                        with _timer("values", timing_raw):
+                            values = self.critic_wg.compute_values(batch)
+                            batch = batch.union(values)
+
+                    if update_pad_size > 0:
+                        batch = unpad_dataproto(batch, pad_size=update_pad_size)
 
                     # balance the number of valid tokens on each dp rank.
                     # Note that this breaks the order of data inside the batch.
                     # Please take care when you implement group based adv computation such as GRPO and rloo
                     self._balance_batch(batch, metrics=metrics)
-
-                    # reset the envs for next batch
-                    # is_validate_step = (
-                    #     self.config.trainer.val_freq > 0
-                    #     and self.global_step % self.config.trainer.val_freq == 0
-                    # )
-                    # try:
-                    #     batch_dict_next_batch = next(iterator)
-                        
-                    #     if not is_validate_step:
-                    #         # if is_validate_step, we will reset the envs after validation
-                    #         task_configs_next_batch, reset_envs_object_next_batch = self.start_reset_envs(batch_dict_next_batch)
-                    # except StopIteration:
-                    #     batch_dict_next_batch = None
-
-                    # compute ref_log_probs (pad if needed for DP chunking)
-                    if self.use_reference_policy:
-                        with _timer("ref", timing_raw):
-                            if len(batch) % num_dp_workers != 0:
-                                batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
-                                ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch_dp)
-                                ref_log_probs = unpad_dataproto(ref_log_probs, pad_size)
-                            else:
-                                ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
-                            batch = batch.union(ref_log_probs)
-
-                    # compute values (pad if needed for DP chunking)
-                    if self.use_critic:
-                        with _timer("values", timing_raw):
-                            if len(batch) % num_dp_workers != 0:
-                                batch_dp, pad_size = pad_dataproto_to_divisor(batch, num_dp_workers)
-                                values = self.critic_wg.compute_values(batch_dp)
-                                values = unpad_dataproto(values, pad_size)
-                            else:
-                                values = self.critic_wg.compute_values(batch)
-                            batch = batch.union(values)
 
                     with _timer("adv", timing_raw):
                         # apply kl penalty if available
