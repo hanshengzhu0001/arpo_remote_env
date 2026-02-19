@@ -36,7 +36,9 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
     # prompt_mask = batch.batch["attention_mask"][:, :-max_response_length].bool()
     # response_mask = batch.batch["attention_mask"][:, -max_response_length:].bool()
     prompt_mask = (torch.logical_and(batch.batch["attention_mask"], batch.batch["labels"] == -100)).bool()
-    response_mask = (batch.batch["labels"] != -100).bool()
+    # Use the batch's pre-computed response_mask (shifted to match responses/advantages)
+    # rather than recomputing from labels (which has full seqlen, not shifted seqlen-1).
+    response_mask = batch.batch["response_mask"].bool() if "response_mask" in batch.batch.keys() else (batch.batch["labels"] != -100).bool()
 
     max_prompt_length = prompt_mask.size(-1)
     prompt_length = prompt_mask.sum(-1).float()

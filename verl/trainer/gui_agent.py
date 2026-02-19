@@ -646,22 +646,81 @@ class EnvWorker():
             
 
     def get_train_dict(self):
+        # --- Trim images to match what survives truncation -----------------------
+        pixel_values = self.pixel_values
+        image_grid_thw = self.image_grid_thw
+        max_len = self.config.data.max_prompt_length
+        work_ids = self.input_ids.clone()
+        work_labels = self.labels.clone()
+        work_attn = self.attention_mask.clone()
+        n_images_removed = 0
+
+        if pixel_values is not None and image_grid_thw is not None and work_ids.size(0) > max_len:
+            truncated_ids = work_ids[:max_len]
+            vision_start_id = self.processor.tokenizer.convert_tokens_to_ids("<|vision_start|>")
+            image_pad_id = self.processor.tokenizer.convert_tokens_to_ids("<|image_pad|>")
+            vision_end_id = self.processor.tokenizer.convert_tokens_to_ids("<|vision_end|>")
+            pad_token_id = self.tokenizer.pad_token_id
+            ids_list = truncated_ids.tolist()
+
+            n_surviving_images = 0
+            for i, tid in enumerate(ids_list):
+                if tid == vision_start_id and i + 1 < len(ids_list) and ids_list[i + 1] == image_pad_id:
+                    n_surviving_images += 1
+
+            n_total_images = image_grid_thw.size(0)
+            if n_surviving_images > 0 and n_surviving_images <= n_total_images:
+                merge_size = self.processor.image_processor.merge_size
+                actual_pad_tokens = sum(1 for tid in ids_list if tid == image_pad_id)
+                expected_pad_tokens = 0
+                for i in range(n_surviving_images):
+                    t, h, w = self.image_grid_thw[i].tolist()
+                    expected_pad_tokens += (t * h * w) // (merge_size ** 2)
+                while n_surviving_images > 0 and actual_pad_tokens < expected_pad_tokens:
+                    n_surviving_images -= 1
+                    t, h, w = self.image_grid_thw[n_surviving_images].tolist()
+                    expected_pad_tokens -= (t * h * w) // (merge_size ** 2)
+
+            if n_surviving_images < n_total_images:
+                n_images_removed = n_total_images - n_surviving_images
+                image_grid_thw = self.image_grid_thw[:n_surviving_images]
+                n_pixels_keep = 0
+                for i in range(n_surviving_images):
+                    t, h, w = image_grid_thw[i].tolist()
+                    n_pixels_keep += t * h * w
+                pixel_values = pixel_values[:n_pixels_keep] if n_pixels_keep > 0 else None
+
+                # Scrub orphan image tokens from work_ids
+                img_count = 0
+                full_ids = work_ids.tolist()
+                for j, tid in enumerate(full_ids):
+                    if tid == vision_start_id:
+                        if j + 1 < len(full_ids) and full_ids[j + 1] == image_pad_id:
+                            img_count += 1
+                    if img_count > n_surviving_images:
+                        if tid in (vision_start_id, image_pad_id, vision_end_id):
+                            full_ids[j] = pad_token_id
+                work_ids = torch.tensor(full_ids, dtype=work_ids.dtype, device=work_ids.device)
+                scrub_mask = (work_ids == pad_token_id) & (self.input_ids != pad_token_id)
+                work_attn[scrub_mask] = 0
+                work_labels[scrub_mask] = -100
+
         position_ids = get_rope_index(
                 self.processor,
-                input_ids=self.input_ids,
-                image_grid_thw=self.image_grid_thw,
-                attention_mask=self.attention_mask,
+                input_ids=work_ids,
+                image_grid_thw=image_grid_thw if n_images_removed > 0 else self.image_grid_thw,
+                attention_mask=work_attn,
             )
         
         input_ids, attention_mask, position_ids, labels = VF.postprocess_data(
-                input_ids=self.input_ids,
-                attention_mask=self.attention_mask,
+                input_ids=work_ids,
+                attention_mask=work_attn,
                 position_ids=position_ids,
-                max_length=self.config.data.max_prompt_length,
+                max_length=max_len,
                 pad_token_id=self.tokenizer.pad_token_id,
                 left_pad=True,
                 truncation='right',
-                labels=self.labels
+                labels=work_labels
             )
         data = {
             'input_ids': input_ids,
@@ -669,11 +728,11 @@ class EnvWorker():
             'position_ids': position_ids,
             'attention_mask': attention_mask,
         }
-        if self.pixel_values is not None:
-            multi_modal_inputs = dict()
-            multi_modal_inputs['pixel_values'] = self.pixel_values
-            multi_modal_inputs['image_grid_thw'] = self.image_grid_thw
-            data['multi_modal_inputs'] = multi_modal_inputs
+        if pixel_values is not None and image_grid_thw is not None and image_grid_thw.size(0) > 0:
+            data['multi_modal_inputs'] = {
+                'pixel_values': pixel_values,
+                'image_grid_thw': image_grid_thw,
+            }
         return data
     
     def reset(self, task_config):
@@ -1023,21 +1082,96 @@ class RemoteEnvWorker:
             self.image_grid_thw = torch.cat([self.image_grid_thw, igt], dim=0)
 
     def get_train_dict(self):
+        if self.processor is None:
+            return {
+                "input_ids": self.input_ids,
+                "labels": self.labels,
+                "position_ids": torch.zeros((3, self.input_ids.size(0)), dtype=torch.int64) if self.input_ids.numel() else torch.zeros((3, 0), dtype=torch.int64),
+                "attention_mask": self.attention_mask,
+            }
+
+        # --- Trim images to match what survives truncation -----------------------
+        pixel_values = self.pixel_values
+        image_grid_thw = self.image_grid_thw
+        max_len = self.config.data.max_prompt_length
+        # Work on a copy so self.input_ids/labels/attention_mask aren't mutated
+        work_ids = self.input_ids.clone()
+        work_labels = self.labels.clone()
+        work_attn = self.attention_mask.clone()
+        n_images_removed = 0
+
+        if pixel_values is not None and image_grid_thw is not None and work_ids.size(0) > max_len:
+            truncated_ids = work_ids[:max_len]
+            vision_start_id = self.processor.tokenizer.convert_tokens_to_ids("<|vision_start|>")
+            image_pad_id = self.processor.tokenizer.convert_tokens_to_ids("<|image_pad|>")
+            vision_end_id = self.processor.tokenizer.convert_tokens_to_ids("<|vision_end|>")
+            pad_token_id = self.tokenizer.pad_token_id
+            ids_list = truncated_ids.tolist()
+
+            # Count images whose <|vision_start|> appears in truncated window
+            n_surviving_images = 0
+            for i, tid in enumerate(ids_list):
+                if tid == vision_start_id and i + 1 < len(ids_list) and ids_list[i + 1] == image_pad_id:
+                    n_surviving_images += 1
+
+            n_total_images = image_grid_thw.size(0)
+            if n_surviving_images > 0 and n_surviving_images <= n_total_images:
+                merge_size = self.processor.image_processor.merge_size
+                actual_pad_tokens = sum(1 for tid in ids_list if tid == image_pad_id)
+                expected_pad_tokens = 0
+                for i in range(n_surviving_images):
+                    t, h, w = self.image_grid_thw[i].tolist()
+                    expected_pad_tokens += (t * h * w) // (merge_size ** 2)
+                while n_surviving_images > 0 and actual_pad_tokens < expected_pad_tokens:
+                    n_surviving_images -= 1
+                    t, h, w = self.image_grid_thw[n_surviving_images].tolist()
+                    expected_pad_tokens -= (t * h * w) // (merge_size ** 2)
+
+            if n_surviving_images < n_total_images:
+                n_images_removed = n_total_images - n_surviving_images
+                image_grid_thw = self.image_grid_thw[:n_surviving_images]
+                n_pixels_keep = 0
+                for i in range(n_surviving_images):
+                    t, h, w = image_grid_thw[i].tolist()
+                    n_pixels_keep += t * h * w
+                pixel_values = pixel_values[:n_pixels_keep] if n_pixels_keep > 0 else None
+
+                # Scrub orphan image tokens from work_ids so the model doesn't see
+                # image_pad tokens without matching pixel features.
+                # Walk work_ids, count images by vision_start; once past n_surviving_images,
+                # replace vision_start/image_pad/vision_end with pad_token_id.
+                img_count = 0
+                full_ids = work_ids.tolist()
+                for j, tid in enumerate(full_ids):
+                    if tid == vision_start_id:
+                        # Check if this is an image start (followed by image_pad)
+                        if j + 1 < len(full_ids) and full_ids[j + 1] == image_pad_id:
+                            img_count += 1
+                    if img_count > n_surviving_images:
+                        if tid in (vision_start_id, image_pad_id, vision_end_id):
+                            full_ids[j] = pad_token_id
+                work_ids = torch.tensor(full_ids, dtype=work_ids.dtype, device=work_ids.device)
+                # Also zero out attention_mask and labels for the scrubbed positions
+                scrub_mask = (work_ids == pad_token_id) & (self.input_ids != pad_token_id)
+                work_attn[scrub_mask] = 0
+                work_labels[scrub_mask] = -100
+
+        # Compute position_ids with original full-sequence data for correct rope
         position_ids = get_rope_index(
             self.processor,
-            input_ids=self.input_ids,
-            image_grid_thw=self.image_grid_thw,
-            attention_mask=self.attention_mask,
+            input_ids=work_ids,
+            image_grid_thw=image_grid_thw if n_images_removed > 0 else self.image_grid_thw,
+            attention_mask=work_attn,
         )
         input_ids, attention_mask, position_ids, labels = VF.postprocess_data(
-            input_ids=self.input_ids,
-            attention_mask=self.attention_mask,
+            input_ids=work_ids,
+            attention_mask=work_attn,
             position_ids=position_ids,
-            max_length=self.config.data.max_prompt_length,
+            max_length=max_len,
             pad_token_id=self.tokenizer.pad_token_id,
             left_pad=True,
             truncation="right",
-            labels=self.labels,
+            labels=work_labels,
         )
         data = {
             "input_ids": input_ids,
@@ -1045,10 +1179,10 @@ class RemoteEnvWorker:
             "position_ids": position_ids,
             "attention_mask": attention_mask,
         }
-        if self.pixel_values is not None:
+        if pixel_values is not None and image_grid_thw is not None and image_grid_thw.size(0) > 0:
             data["multi_modal_inputs"] = {
-                "pixel_values": self.pixel_values,
-                "image_grid_thw": self.image_grid_thw,
+                "pixel_values": pixel_values,
+                "image_grid_thw": image_grid_thw,
             }
         return data
 
@@ -1057,6 +1191,7 @@ class RemoteEnvWorker:
     REMOTE_STEP_TIMEOUT = 300     # 5 min
     REMOTE_EVALUATE_TIMEOUT = 300  # 5 min
     REMOTE_EVALUATE_RETRIES = 4   # 5 attempts total; 503/env-not-ready often transient
+    REMOTE_RESET_RETRIES = 2      # 3 attempts total for reset (503 often transient)
 
     def _post(self, path: str, json_body: dict, timeout=None):
         url = f"{self.remote_server_url}{path}"
@@ -1065,6 +1200,7 @@ class RemoteEnvWorker:
         return r.json()
 
     def reset(self, task_config):
+        import time
         self.instruction = task_config.get("instruction")
         self.task_config = task_config
         self.step_counter = 0
@@ -1074,10 +1210,19 @@ class RemoteEnvWorker:
         self.history_messages = []
         self.history_images = []
 
-        try:
-            resp = self._post("/env/reset", {"task_config": task_config}, timeout=self.REMOTE_RESET_TIMEOUT)
-        except Exception as e:
-            print(f"RemoteEnvWorker reset HTTP error: {e}")
+        last_err = None
+        for attempt in range(self.REMOTE_RESET_RETRIES + 1):
+            try:
+                resp = self._post("/env/reset", {"task_config": task_config}, timeout=self.REMOTE_RESET_TIMEOUT)
+                break
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    print(f"RemoteEnvWorker reset failed: {e}. Retrying up to {self.REMOTE_RESET_RETRIES} times with backoff...")
+                if attempt < self.REMOTE_RESET_RETRIES:
+                    time.sleep(5 * (attempt + 1))
+        else:
+            print(f"RemoteEnvWorker reset HTTP error (all {self.REMOTE_RESET_RETRIES + 1} attempts failed): {last_err}.")
             return {"env_idx": self.worker_idx, "obs_messages": None, "is_done": True, "format_reward": 0.0}
 
         self._is_done = resp.get("is_done", True)
@@ -1123,11 +1268,12 @@ class RemoteEnvWorker:
                 return score_float
             except Exception as e:
                 last_err = e
+                if attempt == 0:
+                    print(f"RemoteEnvWorker evaluate failed: {e}. Retrying up to {self.REMOTE_EVALUATE_RETRIES} times with backoff...")
                 if attempt < self.REMOTE_EVALUATE_RETRIES:
                     wait = 5 * (attempt + 1)  # 5s, 10s, 15s, 20s backoff
-                    print(f"RemoteEnvWorker evaluate attempt {attempt + 1} failed: {e}, retrying in {wait}s...")
                     time.sleep(wait)
-        print(f"RemoteEnvWorker evaluate HTTP error (all retries exhausted): {last_err}. Returning 0.0.")
+        print(f"RemoteEnvWorker evaluate HTTP error (all {self.REMOTE_EVALUATE_RETRIES + 1} attempts failed): {last_err}. Returning 0.0.")
         return 0.0
 
     def get_history_messages(self):

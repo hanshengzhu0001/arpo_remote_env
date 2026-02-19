@@ -70,8 +70,17 @@ class FSDPVLLMShardingManager(BaseShardingManager):
     def _make_weight_iterator(
         self, actor_weights: Dict[str, Union[torch.Tensor, DTensor]]
     ) -> Iterable[Tuple[str, torch.Tensor]]:
+        # HuggingFace Qwen2VL uses "model.visual.*" and "model.language_model.*"; vLLM expects
+        # "visual.*" and "language_model.model.*". Rewrite keys so vLLM's hf_to_vllm_mapper
+        # (which only maps "model." -> "language_model.model.", "lm_head." -> "language_model.lm_head.")
+        # can resolve visual and language_model correctly.
         for name, tensor in actor_weights.items():
-            yield name, tensor.full_tensor() if self.world_size != 1 else tensor
+            if name.startswith("model.visual."):
+                name = "visual." + name[len("model.visual.") :]
+            elif name.startswith("model.language_model."):
+                name = "language_model.model." + name[len("model.language_model.") :]
+            tensor = tensor.full_tensor() if self.world_size != 1 else tensor
+            yield name, tensor
 
     def __enter__(self):
         # NOTE: Basically, we only need `torch.cuda.empty_cache()` before vllm wake_up and

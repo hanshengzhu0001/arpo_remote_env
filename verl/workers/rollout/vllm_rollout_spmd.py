@@ -64,11 +64,17 @@ class vLLMRollout(BaseRollout):
 
         vllm_init_kwargs = {}
         if config.limit_images > 0:
-            vllm_init_kwargs = {"limit_mm_per_prompt": {"image": config.limit_images}}
+            vllm_init_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
+        # Qwen2VL image processor expects size with shortest_edge/longest_edge; model config may have min_pixels/max_pixels only.
+        if getattr(config, "image_min_pixels", 0) > 0 and getattr(config, "image_max_pixels", 0) > 0:
+            vllm_init_kwargs["mm_processor_kwargs"] = {
+                "size": {"shortest_edge": config.image_min_pixels, "longest_edge": config.image_max_pixels},
+            }
 
         self.inference_engine = LLM(
             model=model_path,
             skip_tokenizer_init=False,
+            trust_remote_code=getattr(config, "trust_remote_code", True),
             tensor_parallel_size=config.tensor_parallel_size,
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
             gpu_memory_utilization=config.gpu_memory_utilization,

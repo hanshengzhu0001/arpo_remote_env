@@ -30,6 +30,7 @@ def is_rank0() -> int:
 
 def print_gpu_memory_usage(prefix: str = "GPU memory usage", per_rank: bool = False) -> None:
     """Report the current GPU VRAM usage with detailed breakdown.
+    Set VERL_VERBOSE_GPU_MEM=1 to enable; otherwise no-op to reduce log volume.
     
     Args:
         prefix: Label for the memory report
@@ -37,13 +38,16 @@ def print_gpu_memory_usage(prefix: str = "GPU memory usage", per_rank: bool = Fa
     """
     if not torch.cuda.is_available():
         return
-    
+    import os
+    if os.environ.get("VERL_VERBOSE_GPU_MEM", "") != "1":
+        return
+
     rank = dist.get_rank() if dist.is_initialized() else 0
     world_size = dist.get_world_size() if dist.is_initialized() else 1
-    
+
     # Always print for rank 0, or print for all ranks if per_rank=True
     should_print = (rank == 0) or per_rank
-    
+
     if should_print:
         device = torch.cuda.current_device()
         free_mem, total_mem = torch.cuda.mem_get_info(device)

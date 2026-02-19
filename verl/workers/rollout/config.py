@@ -27,6 +27,11 @@ class RolloutConfig:
     top_p: float = 1.0
     top_k: int = -1
     limit_images: int = 0
+    trust_remote_code: bool = True  # required for custom image processors (e.g. UI-TARS)
+    # Qwen2VL-style image processor expects size with shortest_edge/longest_edge (not min_pixels/max_pixels).
+    # Set these to fix "size must contain 'shortest_edge' and 'longest_edge' keys" when model config uses max_pixels/min_pixels.
+    image_min_pixels: int = 0  # 0 = do not override; else set mm_processor_kwargs size.shortest_edge
+    image_max_pixels: int = 0  # 0 = do not override; else set mm_processor_kwargs size.longest_edge
     dtype: str = "bf16"
     gpu_memory_utilization: float = 0.6
     ignore_eos: bool = False

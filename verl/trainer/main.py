@@ -117,13 +117,23 @@ def main():
     ppo_config = OmegaConf.merge(default_config, cli_args)
     ppo_config = OmegaConf.to_object(ppo_config)
 
+    # Resolve data paths to absolute so Ray workers (possibly different cwd) can find files
+    if getattr(ppo_config.data, "train_files", None) and not os.path.isabs(ppo_config.data.train_files):
+        ppo_config.data.train_files = os.path.abspath(ppo_config.data.train_files)
+    if getattr(ppo_config.data, "val_files", None) and not os.path.isabs(ppo_config.data.val_files):
+        ppo_config.data.val_files = os.path.abspath(ppo_config.data.val_files)
+
     if not ray.is_initialized():
-        # Start a fresh local Ray cluster (avoid connecting to an existing one with a different Ray/Python version)
-        import os
+        # Start a fresh local Ray cluster (avoid connecting to an existing one with a different Ray/Python version).
+        # Explicitly clear RAY_ADDRESS so we don't connect to a stale cluster (e.g. 10.100.4.6:2468) whose
+        # session dir may have been removed by clear_ray_logs.sh, which causes "Can't find node_ip_address.json".
         for key in list(os.environ):
             if key.startswith("RAY_"):
                 os.environ.pop(key, None)
-        ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
+        ray.init(
+            address="local",
+            runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}},
+        )
     
     print(ray.cluster_resources().keys())
 
@@ -134,10 +144,19 @@ def main():
         # Runner died: (1) normal exit via os._exit(0) after fit() completes, or
         # (2) unexpected death (OOM, SIGSEGV). Exit immediately without
         # ray.shutdown() to avoid segmentation fault during cleanup.
-        if isinstance(e, RayTaskError) and e.cause is not None:
-            print(f"Runner worker died: {e.cause}")
+        err_str = str(e).lower()
+        if "owner" in err_str and ("died" in err_str or "crashed" in err_str):
+            print("Runner exited because the owner (driver/head) died — often OOM or node crash.")
+            print("Check the driver log for the root cause:")
+            print("  /tmp/ray/session_latest/logs/python-core-driver-*.log")
+            print("  and worker logs: python-core-worker-*.log in the same directory.")
         else:
-            print("Runner exited (normal after fit() or worker crash). Exiting cleanly.")
+            print("Runner exited (worker crash or normal exit).")
+        if isinstance(e, RayTaskError) and e.cause is not None:
+            print(f"Task error cause:\n{e.cause}")
+        else:
+            print(f"Exception: {type(e).__name__}: {e}")
+        print("Tip: run scripts/clear_ray_logs.sh before training to remove previous logs and get a fresh session.")
         os._exit(0)
     finally:
         try:

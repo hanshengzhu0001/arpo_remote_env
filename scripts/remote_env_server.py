@@ -8,7 +8,8 @@ Aligns with ARPO_OSWorld_Evaluation / run_uitars.py:
 - Same DesktopEnv: observation_type=screenshot, action_space=pyautogui.
 - Reset returns obs_messages built from env screenshot (same as evaluation agent gets).
 - Provider: On macOS (Darwin), defaults to VMware (no /dev/kvm; use VMware Fusion).
-  On Linux, defaults to Docker. Override with env PROVIDER=vmware or PROVIDER=docker.
+  On Linux, defaults to Docker. Override with env PROVIDER=aws (EC2), PROVIDER=vmware, or PROVIDER=docker.
+  Use PROVIDER=aws on EC2 when boto3 and aws configure are set up (launches EC2 env instances; no local Docker VM).
 """
 REMOTE_ENV_STAMP = "b36ed69-lifespan"  # grep this on Mac to confirm you have latest
 import sys
@@ -200,8 +201,9 @@ def _default_provider() -> str:
 async def _lifespan(app: FastAPI):
     # Always log so we confirm lifespan runs; then run Docker patch when provider is docker
     provider = (os.environ.get("PROVIDER") or _default_provider()).strip().lower() or "docker"
-    logger.info("Startup: PROVIDER=%s, will patch Docker provider=%s", provider, provider == "docker")
-    # Fallback so message always visible if uvicorn swallows app logger
+    if provider not in ("docker", "vmware", "aws"):
+        provider = "docker"
+    logger.info("Startup: PROVIDER=%s, will patch Docker=%s", provider, provider == "docker")
     print(f"[remote_env_server] Startup: PROVIDER={provider}, patching Docker={provider == 'docker'}", file=sys.stderr, flush=True)
     if provider == "docker":
         _patch_docker_provider_ports()
@@ -231,9 +233,9 @@ def _build_init_messages(screenshot_bytes: bytes, instruction_text: str) -> list
 def _get_env():
     global env
     if env is None:
-        # Default: VMware on macOS (no KVM), Docker on Linux. Override with PROVIDER=vmware|docker.
+        # Default: VMware on macOS (no KVM), Docker on Linux. Override with PROVIDER=aws|vmware|docker.
         provider_name = (os.environ.get("PROVIDER") or _default_provider()).strip().lower()
-        if provider_name not in ("docker", "vmware"):
+        if provider_name not in ("docker", "vmware", "aws"):
             provider_name = "docker"
         if provider_name == "docker":
             if docker is None:
@@ -245,21 +247,24 @@ def _get_env():
                     ),
                 )
             _patch_docker_provider_ports()
-        # Check KVM availability for logging (Docker VM; VMware uses its own acceleration)
+        # Check KVM availability for logging (Docker only; AWS/VMware use their own)
         kvm_available = os.path.exists("/dev/kvm")
-        if kvm_available:
-            print("✓ KVM detected: /dev/kvm exists - VM will use hardware acceleration")
-        else:
-            print("⚠ KVM not found: /dev/kvm does not exist - VM will use software emulation (slower)")
+        if provider_name == "docker":
+            if kvm_available:
+                print("✓ KVM detected: /dev/kvm exists - VM will use hardware acceleration")
+            else:
+                print("⚠ KVM not found: /dev/kvm does not exist - VM will use software emulation (slower)")
+        if provider_name == "aws":
+            print("✓ Using provider: aws (EC2 instances; ensure boto3 and aws configure are set)")
         print(f"✓ Using provider: {provider_name} (observation_type=screenshot, same as run_uitars)")
-        # Docker provider: runs QEMU/KVM VM inside container (happysixd/osworld-docker).
-        # Screenshots come from VM via controller.get_screenshot() → http://localhost:5000/screenshot.
-        # VMware provider: uses VMware VM directly (when PROVIDER=vmware).
+        # Docker: QEMU/KVM VM inside container. VMware: Fusion VM. AWS: EC2 instances (no local Docker).
         global _provider_name
         _provider_name = provider_name
+        region = os.environ.get("AWS_REGION", "us-east-1")
         try:
             env = DesktopEnv(
                 provider_name=provider_name,
+                region=region,
                 action_space="pyautogui",
                 screen_size=(1920, 1080),
                 cache_dir="cache_dirs/cache_0",

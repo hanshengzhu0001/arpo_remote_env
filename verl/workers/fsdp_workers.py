@@ -76,8 +76,10 @@ class FSDPWorker(Worker):
 
         if not dist.is_initialized():
             # Pin each rank to its GPU so NCCL doesn't guess (avoids hang/OOM on heterogeneous mapping)
-            device_id = int(
+            local_rank = int(
                 os.environ.get("LOCAL_RANK", os.environ.get("RAY_LOCAL_RANK", os.environ.get("RANK", "0"))))
+            # PyTorch 2.x init_process_group expects device_id as torch.device, not int
+            device_id = torch.device("cuda", local_rank)
             dist.init_process_group(backend="nccl", device_id=device_id)
 
         # improve numerical stability

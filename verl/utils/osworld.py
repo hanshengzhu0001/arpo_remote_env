@@ -46,10 +46,53 @@ VISION_END_TOKEN = "<|vision_end|>"
 
 SYSTEM_MESSAGE = "You are a helpful assistant."
 
+
+def _truncate_message_to_last_n_images(message: List[Dict], max_images: int) -> List[Dict]:
+    """Keep only the last max_images images in the message so vLLM limit is not exceeded."""
+    if max_images <= 0:
+        return message
+    # Collect (msg_idx, content_idx) for every image content item
+    image_positions = []
+    for mi, msg in enumerate(message):
+        content = msg.get("content") or []
+        if not isinstance(content, list):
+            content = [content]
+        for ci, c in enumerate(content):
+            if isinstance(c, dict) and "image" in c:
+                image_positions.append((mi, ci))
+    if len(image_positions) <= max_images:
+        return message
+    drop_count = len(image_positions) - max_images
+    drop_set = set(image_positions[:drop_count])
+    # Build new message keeping only content not in drop_set (for images)
+    out = []
+    for mi, msg in enumerate(message):
+        content = msg.get("content") or []
+        if not isinstance(content, list):
+            content = [content]
+        new_content = []
+        for ci, c in enumerate(content):
+            if isinstance(c, dict) and "image" in c:
+                if (mi, ci) in drop_set:
+                    continue
+            new_content.append(c)
+        if new_content:
+            out.append({**msg, "content": new_content})
+    return out if out else message
+
+
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     return features
 
-def collate_fn_dataproto(features: List[Dict[str, Any]]) -> Dict[str, Any]:
+# Pad values for sequence tensors when batching variable-length samples
+_SEQ_PAD_VALUES = {"input_ids": None, "attention_mask": 0, "position_ids": 0, "labels": -100}
+
+
+def collate_fn_dataproto(
+    features: List[Dict[str, Any]],
+    pad_token_id: Optional[int] = 0,
+) -> Dict[str, Any]:
+    """Collate features into a batch. Pads variable-length sequence tensors to max length before stacking."""
     tensors = defaultdict(list)
     non_tensors = defaultdict(list)
     for feature in features:
@@ -58,6 +101,22 @@ def collate_fn_dataproto(features: List[Dict[str, Any]]) -> Dict[str, Any]:
                 tensors[key].append(value)
             else:
                 non_tensors[key].append(value)
+
+    # Pad sequence tensors to max length in batch so stack succeeds
+    for key, value_list in tensors.items():
+        if not value_list or all(v.shape == value_list[0].shape for v in value_list):
+            continue
+        max_len = max(v.size(-1) for v in value_list)
+        pad_val = _SEQ_PAD_VALUES.get(key)
+        if pad_val is None:
+            pad_val = pad_token_id if pad_token_id is not None else 0
+        left_pad = True
+        padded = []
+        for v in value_list:
+            if v.size(-1) < max_len:
+                v = VF.pad_sequence_to_length(v, max_seq_len=max_len, pad_token_id=pad_val, left_pad=left_pad)
+            padded.append(v)
+        tensors[key] = padded
 
     for key, value in tensors.items():
         tensors[key] = torch.stack(value, dim=0)
@@ -125,8 +184,8 @@ class OSWorldTaskConfigDataset(Dataset):
         self,
         data_path: str,
     ):
-        self.data_path = data_path
-        with open(data_path, "r") as f:
+        self.data_path = os.path.abspath(data_path)
+        with open(self.data_path, "r") as f:
             task_configs = json.load(f)
         
         self.dataset = []
@@ -143,8 +202,8 @@ class OSWorldTaskConfigDataset(Dataset):
 
         domain, task_id = self.dataset[index]
 
-        baes_path = os.path.dirname(self.data_path)
-        with open(os.path.join(baes_path, 'examples', domain, task_id + '.json'), "r") as f:
+        base_path = os.path.dirname(self.data_path)
+        with open(os.path.join(base_path, 'examples', domain, task_id + '.json'), "r") as f:
             task_config = json.load(f)
         
         task_config['domain'] = domain
@@ -170,6 +229,7 @@ class OSWorldDataset(Dataset, ImageProcessMixin):
         max_pixels: int = None,
         min_pixels: int = None,
         fast_rollout: bool = False,
+        limit_images: int = 10,
     ):
         self.messages = messages
         self.tokenizer = tokenizer
@@ -180,13 +240,16 @@ class OSWorldDataset(Dataset, ImageProcessMixin):
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
         self.fast_rollout = fast_rollout
+        self.limit_images = limit_images
 
     def __len__(self):
         return len(self.messages)
     
     
     def __getitem__(self, index):
-        message = self.messages[index]
+        message = copy.deepcopy(self.messages[index])
+        if self.limit_images > 0:
+            message = _truncate_message_to_last_n_images(message, self.limit_images)
 
         tokenizer = self.tokenizer
         processor = self.processor
@@ -201,7 +264,7 @@ class OSWorldDataset(Dataset, ImageProcessMixin):
                 message, return_video_kwargs=True)
 
         row_dict = dict()
-        row_dict["multi_modal_data"] = {"image": image_inputs} # [PIL.Image, ...]
+        row_dict["multi_modal_data"] = {"image": image_inputs}  # [PIL.Image, ...]
 
         if not self.fast_rollout: 
             # Multi-turn conversation tokenization
