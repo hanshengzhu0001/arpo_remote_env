@@ -101,6 +101,16 @@ class TensorBoardLogger(Logger):
 
 class WandbLogger(Logger):
     def __init__(self, config: Dict[str, Any]) -> None:
+        try:
+            import wandb as wandb_module  # type: ignore
+        except ImportError as e:
+            raise RuntimeError(
+                "Wandb logger requested, but package 'wandb' is not installed. "
+                "Install it with: pip install wandb"
+            ) from e
+        self._wandb = wandb_module
+        self._enabled = False
+
         init_kwargs = dict(
             project=config["trainer"]["project_name"],
             name=config["trainer"]["experiment_name"],
@@ -111,7 +121,8 @@ class WandbLogger(Logger):
         if os.environ.get("WANDB_MODE"):
             init_kwargs["mode"] = os.environ["WANDB_MODE"]
         try:
-            wandb.init(**init_kwargs)
+            self._wandb.init(**init_kwargs)
+            self._enabled = True
         except Exception as e:
             err_str = str(e).lower()
             if "403" in str(e) or "400" in str(e) or "permission_error" in err_str or "organization" in err_str or "personal entities" in err_str or "team entity" in err_str:
@@ -120,16 +131,23 @@ class WandbLogger(Logger):
                     "Falling back to offline mode; sync later with: wandb sync <run_dir>"
                 )
                 init_kwargs["mode"] = "offline"
-                wandb.init(**init_kwargs)
+                try:
+                    self._wandb.init(**init_kwargs)
+                    self._enabled = True
+                except Exception as offline_e:
+                    print(f"Wandb offline init also failed, disabling wandb logging: {offline_e}")
             else:
-                raise
+                print(f"Wandb init failed, disabling wandb logging: {e}")
 
     def log(self, data: Dict[str, Any], step: int) -> None:
-        wandb.log(data=data, step=step)
+        if self._enabled:
+            self._wandb.log(data=data, step=step)
 
     def finish(self) -> None:
+        if not self._enabled:
+            return
         try:
-            wandb.finish()
+            self._wandb.finish()
         except (BrokenPipeError, OSError):
             pass  # Process may be exiting; avoid noisy atexit traceback
         # Unregister wandb's atexit so it doesn't run again at process exit and raise BrokenPipeError

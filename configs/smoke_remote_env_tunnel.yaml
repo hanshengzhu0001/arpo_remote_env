@@ -108,7 +108,7 @@ env:
   num_envs: 1  # single env server; sequential rollout loop handles n=2
   max_steps: 32
   screen_size: [1920, 1080]
-  remote_server_url: "http://127.0.0.1:15001"  # SSH tunnel forwards cluster localhost -> Mac
+  remote_server_url: "http://3.80.90.42:15001"  # SSH tunnel forwards cluster localhost -> Mac
 
 trainer:
   total_episodes: 10

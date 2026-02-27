@@ -17,6 +17,8 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 
 import json
 import os
+import sys
+import sysconfig
 
 # Load .env from repo root so OPENAI_API_KEY etc. are available (e.g. for generation)
 def _load_dotenv():
@@ -33,6 +35,45 @@ def _load_dotenv():
         pass
 
 _load_dotenv()
+
+
+def _enable_user_python_headers_if_needed():
+    """Best-effort fallback for environments missing system python-dev headers."""
+    include_py = sysconfig.get_config_var("INCLUDEPY") or ""
+    if include_py and os.path.isfile(os.path.join(include_py, "Python.h")):
+        return
+
+    py_tag = os.path.basename(include_py) if include_py else f"python{sys.version_info.major}.{sys.version_info.minor}"
+    candidate_bases = [
+        os.environ.get("PY_HDR_BASE"),
+        os.path.expanduser("~/.local/python-dev-pkg/extracted/usr/include"),
+        os.path.expanduser("~/.local/python312-dev-pkg/extracted/usr/include"),
+    ]
+
+    for base in candidate_bases:
+        if not base:
+            continue
+        header = os.path.join(base, py_tag, "Python.h")
+        if not os.path.isfile(header):
+            continue
+
+        include_entries = [base, os.path.join(base, py_tag)]
+        for env_var in ("CPATH", "C_INCLUDE_PATH"):
+            existing = os.environ.get(env_var, "")
+            parts = [p for p in existing.split(":") if p]
+            for entry in reversed(include_entries):
+                if entry not in parts:
+                    parts.insert(0, entry)
+            os.environ[env_var] = ":".join(parts)
+
+        print(
+            f"Using user-space Python headers ({header}); "
+            "exported CPATH/C_INCLUDE_PATH for JIT extension builds."
+        )
+        return
+
+
+_enable_user_python_headers_if_needed()
 
 # Add OSWorld to path so desktop_env is importable (git submodule)
 _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

@@ -66,6 +66,24 @@ run_training() {
   # ARPO-style Ray tuning: reduce false-positive worker kills from Ray's memory monitor.
   export RAY_memory_usage_threshold="${RAY_memory_usage_threshold:-0.8}"
   export RAY_memory_monitor_refresh_ms="${RAY_memory_monitor_refresh_ms:-0}"
+  # Workaround for environments where python3-dev headers are not installed system-wide.
+  # Needed by JIT CUDA/C++ extension builds (e.g., Triton/vLLM utilities).
+  local includepy py_tag py_hdr_base
+  includepy="$(python - <<'PY'
+import sysconfig
+print(sysconfig.get_config_var("INCLUDEPY") or "")
+PY
+)"
+  py_tag="$(basename "$includepy")"
+  py_hdr_base="${PY_HDR_BASE:-$HOME/.local/python-dev-pkg/extracted/usr/include}"
+  # Backward-compatible fallback path from older setup.
+  if [[ ! -d "$py_hdr_base" && -d "$HOME/.local/python312-dev-pkg/extracted/usr/include" ]]; then
+    py_hdr_base="$HOME/.local/python312-dev-pkg/extracted/usr/include"
+  fi
+  if [[ -n "$includepy" && ! -f "$includepy/Python.h" && -f "$py_hdr_base/$py_tag/Python.h" ]]; then
+    export CPATH="$py_hdr_base:$py_hdr_base/$py_tag${CPATH:+:$CPATH}"
+    echo "Using user-space Python headers via CPATH=$py_hdr_base:$py_hdr_base/$py_tag"
+  fi
   if [[ -f scripts/clear_ray_logs.sh ]]; then
     bash scripts/clear_ray_logs.sh || true
   fi
@@ -96,6 +114,20 @@ if [[ -n "${1:-}" ]]; then
   ssh -i "$key" -o StrictHostKeyChecking=accept-new "$host" "\
     export PYTHONUNBUFFERED=1 HYDRA_FULL_ERROR=1 VERL_LOGGING_LEVEL=DEBUG MKL_SERVICE_FORCE_INTEL=1 MKL_THREADING_LAYER=GNU \
       RAY_memory_usage_threshold=\${RAY_memory_usage_threshold:-0.8} RAY_memory_monitor_refresh_ms=\${RAY_memory_monitor_refresh_ms:-0}; \
+    includepy=\$(python - <<'PY' \
+import sysconfig \
+print(sysconfig.get_config_var('INCLUDEPY') or '') \
+PY \
+); \
+    py_tag=\$(basename \"\$includepy\"); \
+    py_hdr_base=\${PY_HDR_BASE:-\$HOME/.local/python-dev-pkg/extracted/usr/include}; \
+    if [ ! -d \"\$py_hdr_base\" ] && [ -d \"\$HOME/.local/python312-dev-pkg/extracted/usr/include\" ]; then \
+      py_hdr_base=\"\$HOME/.local/python312-dev-pkg/extracted/usr/include\"; \
+    fi; \
+    if [ -n \"\$includepy\" ] && [ ! -f \"\$includepy/Python.h\" ] && [ -f \"\$py_hdr_base/\$py_tag/Python.h\" ]; then \
+      export CPATH=\"\$py_hdr_base:\$py_hdr_base/\$py_tag\${CPATH:+:\$CPATH}\"; \
+      echo \"Using user-space Python headers via CPATH=\$py_hdr_base:\$py_hdr_base/\$py_tag\"; \
+    fi; \
     cd $remote_dir && ( [ -f scripts/clear_ray_logs.sh ] && bash scripts/clear_ray_logs.sh || true ) && \
     python -m verl.trainer.main config=configs/smoke_remote_env.yaml"
 else

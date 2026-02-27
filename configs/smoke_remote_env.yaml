@@ -17,8 +17,8 @@
 
 data:
   # Use OSWorld/evaluation_examples so dataset finds examples/<domain>/<id>.json
-  train_files: OSWorld/evaluation_examples/test_smoke_8.json
-  val_files: OSWorld/evaluation_examples/test_smoke_8.json
+  train_files: evaluation_examples/test_smoke_4.json
+  val_files: evaluation_examples/test_smoke_4.json
   prompt_key: instruction
   answer_key: ""
   image_key: images
@@ -106,13 +106,13 @@ env:
   num_envs: 1  # 1 env with sequential rollouts (rollout.n=2 -> 2 trajectories per task, run sequentially)
   max_steps: 32
   screen_size: [1920, 1080]
-  remote_server_url: "http://3.88.110.176:15001"
+  remote_server_url: "http://3.80.90.42:15001"
 
 trainer:
   total_episodes: 30
   logger: ["console", "wandb"]
-  project_name: arpo-smoke-test
+  project_name: ARPO
   experiment_name: uitars_2b_remote_env
-  wandb_entity: hanszhu05-university-of-pennsylvania
+  wandb_entity: hanszhu-university-of-pennsylvania
   n_gpus_per_node: 1
   nnodes: 1

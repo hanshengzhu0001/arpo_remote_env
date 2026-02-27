@@ -26,7 +26,7 @@ backoff
 flask==3.0.0
 
 # Remote env server (Mac/CPU) and verl trainer imports
-ray>=2.9.0
+ray==2.54.0
 fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 pydantic>=2.0.0
@@ -60,7 +60,7 @@ pygame
 # Other OSWorld dependencies
 PyGetWindow
 rapidfuzz
-playwright
+playwright==1.58.0
 func-timeout
 formulas
 fastdtw
@@ -73,12 +73,12 @@ fabric
 wandb
 
 # verl trainer (main.py, ray_trainer, fsdp_workers, reward, rollout)
-omegaconf>=2.3.0
-tensordict
+omegaconf==2.3.0
+tensordict==0.11.0
 tensorboard
 vllm
 datasets
-codetiming
+codetiming==1.4.0
 torchdata
 mathruler
 pylatexenc
