@@ -34,6 +34,14 @@ def _load_dotenv():
 
 _load_dotenv()
 
+# Add OSWorld to path so desktop_env is importable (git submodule)
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_osworld = os.path.join(_repo_root, "OSWorld")
+if os.path.isdir(_osworld):
+    import sys
+    if _osworld not in sys.path:
+        sys.path.insert(0, _osworld)
+
 import ray
 from ray.exceptions import RayActorError, RayTaskError
 from omegaconf import OmegaConf

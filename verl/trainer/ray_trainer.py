@@ -54,7 +54,7 @@ from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
 
-from .gui_agent import EnvWorker, RemoteEnvWorker
+from .gui_agent import EnvWorker, RemoteEnvWorker, parse_action_to_structure_output
 from .replay_buffer import ReplayBuffer
 
 from collections import defaultdict
@@ -472,12 +472,14 @@ class RayPPOTrainer:
 
                 # override val config
                 gen_batch.meta_info = self.config.worker.rollout.val_override_config
+                self._apply_task_family_decoding_if_single(gen_batch, valid_env_idx, task_configs, is_val=True)
 
                 # predict actions
                 action_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
                 action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
                 
                 response_texts = self.tokenizer.batch_decode(action_batch_output.batch['responses'], skip_special_tokens=True)
+                response_texts, _, _ = self._retry_invalid_actions_once(gen_batch, response_texts, pad_size)
 
                 cur_valid_envs = [self.env_workers[i] for i in valid_env_idx]
 
@@ -621,6 +623,92 @@ class RayPPOTrainer:
         last_global_step_path = os.path.join(self.config.trainer.save_checkpoint_path, CHECKPOINT_TRACKER)
         with open(last_global_step_path, "w") as f:
             f.write(str(self.global_step))
+
+    def _looks_parseable_gui_action(self, text: str) -> bool:
+        if not text or "Action:" not in text:
+            return False
+        try:
+            screen_w, screen_h = 1920, 1080
+            if getattr(self.config, "env", None) is not None and getattr(self.config.env, "screen_size", None):
+                screen_w, screen_h = self.config.env.screen_size
+            parse_action_to_structure_output(
+                text,
+                1000,  # matches gui_agent worker parse factor
+                screen_h,
+                screen_w,
+                "qwen25vl",
+                16384 * 28 * 28,
+                100 * 28 * 28,
+            )
+            return True
+        except Exception:
+            return False
+
+    def _retry_invalid_actions_once(self, gen_batch, response_texts, pad_size: int):
+        invalid_idx = [i for i, t in enumerate(response_texts) if not self._looks_parseable_gui_action(t)]
+        if not invalid_idx:
+            return response_texts, 0, 0
+        retry_count = len(invalid_idx)
+        print(f"prestep_parser_retry: invalid actions before env.step at idx={invalid_idx}; regenerating once.")
+        retry_output = self.actor_rollout_wg.generate_sequences(gen_batch)
+        retry_output = unpad_dataproto(retry_output, pad_size=pad_size)
+        retry_texts = self.tokenizer.batch_decode(retry_output.batch['responses'], skip_special_tokens=True)
+        recovered = 0
+        for i in invalid_idx:
+            if i < len(retry_texts) and self._looks_parseable_gui_action(retry_texts[i]):
+                response_texts[i] = retry_texts[i]
+                recovered += 1
+        if recovered:
+            print(f"prestep_parser_retry: recovered {recovered}/{retry_count} invalid actions before env.step.")
+        return response_texts, retry_count, recovered
+
+    def _task_family_decoding_overrides(self, task_config: Optional[dict], is_val: bool = False) -> Dict[str, Any]:
+        """Minimal task-family-conditioned decoding presets (safe for smoke runs)."""
+        if not task_config:
+            return {}
+        text = str(task_config.get("instruction") or "").lower()
+        domain = str(task_config.get("domain") or "").lower()
+
+        # Defaults come from YAML; only override high-risk families.
+        overrides: Dict[str, Any] = {}
+        if is_val:
+            # Keep validation mostly deterministic; don't loosen it.
+            return overrides
+
+        # Browser settings / shortcuts / search are the most hallucination-prone for 2B.
+        is_browser_search = any(k in text for k in ("search", "discussions", "reddit", "community"))
+        is_browser_setting = ("bing" in text and "search" in text) or ("default search" in text)
+        is_web_shortcut = "shortcut" in text and any(k in text for k in ("site", "website", "page"))
+        if is_browser_setting or is_web_shortcut:
+            overrides.update({"temperature": 0.10, "top_p": 0.8, "top_k": 20})
+        elif is_browser_search:
+            overrides.update({"temperature": 0.15, "top_p": 0.8, "top_k": 20})
+        # File manager / trash flows benefit from mild but not high exploration.
+        elif "trash" in text or "deleted" in text or domain in {"os", "files"}:
+            overrides.update({"temperature": 0.18, "top_p": 0.8, "top_k": 30})
+        # GIMP/VLC tasks often need precise menu navigation.
+        elif domain in {"gimp", "vlc"} or "gimp" in text or "vlc" in text or "music video" in text:
+            overrides.update({"temperature": 0.15, "top_p": 0.8, "top_k": 20})
+
+        return overrides
+
+    def _apply_task_family_decoding_if_single(self, gen_batch: DataProto, valid_env_idx: List[int], task_configs: List[dict], is_val: bool = False) -> None:
+        """Apply family-conditioned decoding only when batch maps to a single env/task (current smoke path)."""
+        if len(valid_env_idx) != 1:
+            return
+        env_i = valid_env_idx[0]
+        if env_i < 0 or env_i >= len(task_configs):
+            return
+        overrides = self._task_family_decoding_overrides(task_configs[env_i], is_val=is_val)
+        if not overrides:
+            return
+        if getattr(gen_batch, "meta_info", None) is None:
+            gen_batch.meta_info = {}
+        # Preserve existing rollout/val overrides and only specialize decoding knobs.
+        merged = dict(gen_batch.meta_info)
+        merged.update(overrides)
+        gen_batch.meta_info = merged
+        print(f"task_family_decoding: env_idx={env_i} overrides={overrides} task_id={task_configs[env_i].get('id')}")
 
     def _load_checkpoint(self) -> None:
         if self.config.trainer.load_checkpoint_path is None:
@@ -940,12 +1028,14 @@ class RayPPOTrainer:
                                     batch_keys=["input_ids", "attention_mask", "position_ids"],
                                     non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
                                 )
+                                self._apply_task_family_decoding_if_single(gen_batch, valid_env_idx, task_configs, is_val=False)
                                 # predict actions
                                 with _timer("actor_rollout_wg", timing_raw):
                                     action_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
                                 action_batch_output = unpad_dataproto(action_batch_output, pad_size=pad_size)
 
                                 response_texts = self.tokenizer.batch_decode(action_batch_output.batch['responses'], skip_special_tokens=True)
+                                response_texts, _, _ = self._retry_invalid_actions_once(gen_batch, response_texts, pad_size)
                                 if response_texts and step_idx == 0:
                                     sample = (response_texts[0] or "")[:80].replace("\n", " ")
                                     print(f"[seq={seq_idx}] on_policy: model output (preview): {sample!r}")
@@ -956,11 +1046,13 @@ class RayPPOTrainer:
                                         worker.step.remote(action_text) for worker, action_text in zip(cur_valid_envs, response_texts)
                                     ]
                                     env_outputs = ray.get(futures)
-                                # get format rewards
+                                # Collect step-level format reward for every env output.
+                                # Remote env often reaches trainer max_steps without setting is_done=True,
+                                # so only taking terminal format_reward would collapse rewards to zero.
                                 for single_output in env_outputs:
+                                    cur_env_idx = single_output['env_idx']
+                                    format_rewards[cur_env_idx] += float(single_output.get('format_reward', 0.0))
                                     if single_output['is_done']:
-                                        cur_env_idx = single_output['env_idx']
-                                        format_rewards[cur_env_idx] = single_output['format_reward']
                                         eval_results_objects[cur_env_idx] = self.env_workers[cur_env_idx].evaluate.remote()
 
                                 is_all_done = all([x['is_done'] for x in env_outputs])
@@ -968,7 +1060,16 @@ class RayPPOTrainer:
                                     break
 
                             if not batch_skipped:
-                                assert None not in eval_results_objects, 'eval_results_objects should not be None'
+                                missing_eval_idx = [i for i, x in enumerate(eval_results_objects) if x is None]
+                                if missing_eval_idx:
+                                    # Some envs may never emit is_done=True before trainer max_steps.
+                                    # Trigger evaluate at rollout cutoff so training does not crash.
+                                    print(
+                                        f"[seq={seq_idx}] max_steps reached before done for env_idx={missing_eval_idx}; "
+                                        "scheduling evaluate at cutoff."
+                                    )
+                                    for i in missing_eval_idx:
+                                        eval_results_objects[i] = self.env_workers[i].evaluate.remote()
 
                         # Collect results for this sequential rollout
                         with _timer("evaluate_env", timing_raw):
@@ -988,6 +1089,15 @@ class RayPPOTrainer:
 
                     # Build the training batch from all sequential rollouts
                     with _timer("prepare_grpo_inputs", timing_raw):
+                        # Some rollouts can lose image features after truncation and omit
+                        # multi_modal_* keys, while others still include them. Normalize
+                        # keys across samples so DataProto non-tensor lengths stay aligned.
+                        if all_process_results:
+                            mm_keys = ("multi_modal_inputs", "multi_modal_data")
+                            for k in mm_keys:
+                                if any(k in x for x in all_process_results):
+                                    for x in all_process_results:
+                                        x.setdefault(k, {})
                         pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
                         batch = collate_fn_dataproto(all_process_results, pad_token_id=pad_token_id)
                         batch = DataProto.from_single_dict(batch)
@@ -1007,7 +1117,14 @@ class RayPPOTrainer:
                     # exactly response_length elements only when response_length < seqlen.
                     # Setting responses = input_ids[:, 1:] ensures response_length = seqlen-1.
                     batch.batch["responses"] = batch.batch["input_ids"][:, 1:]
-                    batch.batch["response_mask"] = (batch.batch["labels"] != -100)[:, 1:]
+                    response_len = batch.batch["responses"].size(1)
+                    seq_len = batch.batch["input_ids"].size(1)
+                    # Truncate labels to match input_ids so no tensor has longer seq dim (avoids 8192 vs 45122 mismatch)
+                    if batch.batch["labels"].size(1) > seq_len:
+                        batch.batch["labels"] = batch.batch["labels"][:, :seq_len].contiguous()
+                    # Truncate response_mask to match responses (labels can be longer than input_ids after collate)
+                    labels_shifted = (batch.batch["labels"] != -100)[:, 1:]
+                    batch.batch["response_mask"] = labels_shifted[:, :response_len].contiguous()
 
                     print('prepare_grpo_inputs_time: ', timing_raw['prepare_grpo_inputs'], '| batch size: ', len(batch),
                           '| input_ids:', batch.batch["input_ids"].shape,
@@ -1034,7 +1151,10 @@ class RayPPOTrainer:
                     # eval 0.0 is expected until the policy learns; format_reward gives signal for parse success and meaningful actions
                     with _timer("reward", timing_raw):
                         # self.save_rollout_trajectories(action_batch_output, history_messages_global, eval_results_global, task_conf
-                        rewards = batch.batch["eval_results"] + 0.5 * batch.batch["format_rewards"]
+                        # Remote env now emits step-level format rewards across longer horizons (e.g., 32 steps).
+                        # Clip and downweight shaped reward so task success remains dominant.
+                        format_rewards_clipped = torch.clamp(batch.batch["format_rewards"], -1.0, 1.0)
+                        rewards = batch.batch["eval_results"] + 0.1 * format_rewards_clipped
                         batch.batch["rewards"] = rewards
 
                         if self.use_reward_model:
@@ -1072,6 +1192,7 @@ class RayPPOTrainer:
                             'num_invalid_group': num_invalid_group,
                             'traj_reward': eval_results,
                             'foramt_reward': format_rewards,
+                            'format_reward_clipped': format_rewards_clipped.tolist(),
                         }
 
                         batch.batch["token_level_scores"] = reward_tensor.unsqueeze(-1)
@@ -1084,10 +1205,19 @@ class RayPPOTrainer:
                         if n_batch % rollout_n == 0 and n_batch >= rollout_n:
                             eval_results_global_np = batch.batch["eval_results"].reshape(-1, rollout_n)
                             format_rewards_np = batch.batch["format_rewards"].reshape(-1, rollout_n)
+                            format_rewards_clipped_np = format_rewards_clipped.reshape(-1, rollout_n)
+                            reward_tensor_np = reward_tensor.reshape(-1, rollout_n)
                         else:
                             eval_results_global_np = batch.batch["eval_results"].reshape(-1, 1)
                             format_rewards_np = batch.batch["format_rewards"].reshape(-1, 1)
-                        print(f'Evaluation results:\n{eval_results_global_np}\nFormat rewards:\n{format_rewards_np}')
+                            format_rewards_clipped_np = format_rewards_clipped.reshape(-1, 1)
+                            reward_tensor_np = reward_tensor.reshape(-1, 1)
+                        print(
+                            f'Evaluation results:\n{eval_results_global_np}\n'
+                            f'Format rewards (raw):\n{format_rewards_np}\n'
+                            f'Format rewards (clipped):\n{format_rewards_clipped_np}\n'
+                            f'Final rewards:\n{reward_tensor_np}'
+                        )
                         print('Global eval_results: ', sum(reward_tensor.tolist())/len(batch))
                     
 
@@ -1105,18 +1235,33 @@ class RayPPOTrainer:
                     # recompute old_log_probs
                     with _timer("old", timing_raw):
                         old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
+                        # Ensure old_log_probs tensor matches response_mask length (truncate if needed)
+                        response_len = batch.batch["response_mask"].size(1)
+                        t = old_log_probs.batch["old_log_probs"]
+                        if t.size(1) != response_len:
+                            old_log_probs.batch["old_log_probs"] = t[:, :response_len].contiguous()
                         batch = batch.union(old_log_probs)
 
                     # compute ref_log_probs
                     if self.use_reference_policy:
                         with _timer("ref", timing_raw):
                             ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
+                            # Ensure ref_log_probs tensor matches response_mask length (truncate if needed)
+                            response_len = batch.batch["response_mask"].size(1)
+                            t = ref_log_probs.batch["ref_log_probs"]
+                            if t.size(1) != response_len:
+                                ref_log_probs.batch["ref_log_probs"] = t[:, :response_len].contiguous()
                             batch = batch.union(ref_log_probs)
 
                     # compute values
                     if self.use_critic:
                         with _timer("values", timing_raw):
                             values = self.critic_wg.compute_values(batch)
+                            # Ensure values tensor matches response_mask length (truncate if needed)
+                            response_len = batch.batch["response_mask"].size(1)
+                            t = values.batch["values"]
+                            if t.size(1) != response_len:
+                                values.batch["values"] = t[:, :response_len].contiguous()
                             batch = batch.union(values)
 
                     if update_pad_size > 0:

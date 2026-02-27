@@ -58,6 +58,14 @@ get_ssh_key() {
 run_training() {
   local repo_dir="${1:-.}"
   cd "$repo_dir"
+  export PYTHONUNBUFFERED=1
+  export HYDRA_FULL_ERROR=1
+  export VERL_LOGGING_LEVEL=DEBUG
+  export MKL_SERVICE_FORCE_INTEL=1
+  export MKL_THREADING_LAYER=GNU
+  # ARPO-style Ray tuning: reduce false-positive worker kills from Ray's memory monitor.
+  export RAY_memory_usage_threshold="${RAY_memory_usage_threshold:-0.8}"
+  export RAY_memory_monitor_refresh_ms="${RAY_memory_monitor_refresh_ms:-0}"
   if [[ -f scripts/clear_ray_logs.sh ]]; then
     bash scripts/clear_ray_logs.sh || true
   fi
@@ -85,7 +93,11 @@ if [[ -n "${1:-}" ]]; then
   # Repo path on remote (set ARPO_REMOTE_DIR if different, e.g. /home/kevinzyz/hansenzuishuai)
   remote_dir="${ARPO_REMOTE_DIR:-$REPO_ROOT}"
   echo "SSH to $host (server $idx) using key $key, run training in $remote_dir"
-  ssh -i "$key" -o StrictHostKeyChecking=accept-new "$host" "cd $remote_dir && ( [ -f scripts/clear_ray_logs.sh ] && bash scripts/clear_ray_logs.sh || true ) && python -m verl.trainer.main config=configs/smoke_remote_env.yaml"
+  ssh -i "$key" -o StrictHostKeyChecking=accept-new "$host" "\
+    export PYTHONUNBUFFERED=1 HYDRA_FULL_ERROR=1 VERL_LOGGING_LEVEL=DEBUG MKL_SERVICE_FORCE_INTEL=1 MKL_THREADING_LAYER=GNU \
+      RAY_memory_usage_threshold=\${RAY_memory_usage_threshold:-0.8} RAY_memory_monitor_refresh_ms=\${RAY_memory_monitor_refresh_ms:-0}; \
+    cd $remote_dir && ( [ -f scripts/clear_ray_logs.sh ] && bash scripts/clear_ray_logs.sh || true ) && \
+    python -m verl.trainer.main config=configs/smoke_remote_env.yaml"
 else
   run_training "$REPO_ROOT"
 fi

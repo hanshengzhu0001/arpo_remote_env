@@ -11,7 +11,10 @@ import traceback
 import torch
 from qwen_vl_utils import process_vision_info
 
-from desktop_env.desktop_env import DesktopEnv
+try:
+    from desktop_env.desktop_env import DesktopEnv
+except ModuleNotFoundError:
+    DesktopEnv = None
 
 
 
@@ -510,6 +513,11 @@ class EnvWorker():
     ground_prompt = r"""Output only the coordinate of one point in your response. What element matches the following task: """
 
     def __init__(self, worker_idx, max_steps=15, config=None):
+        if DesktopEnv is None:
+            raise ModuleNotFoundError(
+                "desktop_env is not installed. Required for local EnvWorker only. "
+                "For remote execution, set env.remote_server_url."
+            )
         self.worker_idx = worker_idx
         self.step_timeout = 60
         self.config = config
@@ -737,7 +745,7 @@ class EnvWorker():
     
     def reset(self, task_config):
 
-        self.instruction = task_config.get("instruction", None)
+        self.instruction = _instruction_with_cluster_priors(task_config)
         self.task_config = task_config
         self.step_counter = 0
         self.is_done = False
@@ -980,6 +988,36 @@ import requests
 from .remote_env_protocol import wire_to_messages
 
 
+def _instruction_with_cluster_priors(task_config: dict) -> str:
+    """Inject compact task-family priors on the cluster side before generation."""
+    text = (task_config.get("instruction") or "").strip()
+    domain = str(task_config.get("domain") or "").strip().lower()
+    lower = text.lower()
+    hints = []
+
+    if domain == "gimp" or ("photo" in lower and any(k in lower for k in ("brightness", "vibrancy", "color"))):
+        hints.append("Use GIMP/image editor tools, not Ubuntu System Settings.")
+        hints.append("If GIMP shows a blank canvas, use File -> Open to load the image before using Colors adjustments.")
+        hints.append("For color tasks, prefer Colors menu actions (e.g., Color Balance/Saturation) over random toolbar/sidebar clicks.")
+    if "bing" in lower and "search" in lower:
+        hints.append("Default search engine changes are browser settings (Chrome/Firefox), not Ubuntu system settings.")
+    if any(k in lower for k in ("search", "discussions", "browser", "website")):
+        hints.append("Browser search flow: click address bar/search field, type query, press Enter; avoid repeated new-tab/menu clicks if current tab works.")
+    if "shortcut" in lower and any(k in lower for k in ("site", "website", "page")):
+        hints.append("Create a browser/webpage shortcut on the Desktop, not a generic file/folder in terminal.")
+        hints.append("Do not default to terminal/file-manager workflows unless the task explicitly asks for terminal commands.")
+    if "trash" in lower and any(k in lower for k in ("recover", "deleted")):
+        hints.append("Use Files/Trash and restore the target file; avoid terminal unless the task asks for it.")
+        hints.append("After opening Trash, look for the target file and use Restore/Restore From Trash; avoid repeated clicks on the same list item.")
+    if domain == "vlc" or "vlc" in lower or "music video" in lower:
+        hints.append("Use VLC/media-player controls and the Desktop file, not system settings or search loops.")
+        hints.append("Typical VLC flow: open VLC, then Media -> Open File (or open the Desktop file directly in VLC).")
+
+    if hints:
+        return text + "\n\nTask-family guidance:\n- " + "\n- ".join(hints)
+    return text
+
+
 @ray.remote(num_cpus=1)
 class RemoteEnvWorker:
     """Env worker that forwards reset/step/evaluate to a remote HTTP server (one env on Mac/AWS)."""
@@ -1201,7 +1239,7 @@ class RemoteEnvWorker:
 
     def reset(self, task_config):
         import time
-        self.instruction = task_config.get("instruction")
+        self.instruction = _instruction_with_cluster_priors(task_config)
         self.task_config = task_config
         self.step_counter = 0
         self._is_done = False

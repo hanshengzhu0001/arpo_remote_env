@@ -285,7 +285,17 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # all return: (bsz, response_length)
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
-                    entropy_loss = -VF.masked_mean(log_probs, response_mask)  # estimator of entropy loss
+                    # Align shapes when log_probs and response_mask differ (e.g. variable-length VL batches / padding)
+                    seq_len = min(log_probs.size(1), response_mask.size(1))
+                    if log_probs.size(1) != response_mask.size(1):
+                        log_probs = log_probs[:, :seq_len].contiguous()
+                        response_mask = response_mask[:, :seq_len].contiguous()
+                        old_log_probs = old_log_probs[:, :seq_len].contiguous()
+                        advantages = advantages[:, :seq_len].contiguous()
+                    # Guard against all-zero response_mask (no valid tokens) => skip to avoid NaN
+                    if response_mask.sum() == 0:
+                        continue
+                    entropy_loss = -VF.masked_mean(log_probs, response_mask)
 
                     pg_loss, pg_clipfrac_higher, pg_clipfrac_lower, ppo_kl = core_algos.compute_policy_loss(
                         old_log_probs=old_log_probs,
@@ -297,7 +307,7 @@ class DataParallelPPOActor(BasePPOActor):
                         clip_ratio_dual=self.config.clip_ratio_dual,
                     )
                     if "ref_log_probs" in model_inputs:
-                        ref_log_probs = model_inputs["ref_log_probs"]
+                        ref_log_probs = model_inputs["ref_log_probs"][:, :seq_len].contiguous()
                         # compute kl loss
                         kld = core_algos.compute_kl(
                             log_probs=log_probs,

@@ -189,6 +189,13 @@ step_counter = 0
 max_steps = 16
 instruction: str | None = None
 OBSERVATION_TYPE = "screenshot"  # same as run_uitars --observation_type screenshot
+IMAGE_MIN_PIXELS = int(os.environ.get("REMOTE_IMAGE_MIN_PIXELS", "3136"))
+IMAGE_MAX_PIXELS = int(os.environ.get("REMOTE_IMAGE_MAX_PIXELS", "129024"))
+ACTION_PAUSE_SEC = float(os.environ.get("REMOTE_ACTION_PAUSE_SEC", "1.0"))
+REPEAT_ACTION_THRESHOLD = int(os.environ.get("REMOTE_REPEAT_ACTION_THRESHOLD", "3"))
+REPEAT_ACTION_PENALTY = float(os.environ.get("REMOTE_REPEAT_ACTION_PENALTY", "0.3"))
+_last_action_signature: str | None = None
+_repeat_action_count = 0
 
 def _default_provider() -> str:
     """Use VMware on macOS (no KVM); Docker on Linux."""
@@ -226,8 +233,86 @@ def _build_init_messages(screenshot_bytes: bytes, instruction_text: str) -> list
     return [
         {"role": "system", "content": [{"type": "text", "text": "Your are a helpful assistant."}]},
         {"role": "user", "content": [{"type": "text", "text": uitars_system_prompt.format(instruction=instruction_text)}]},
-        {"role": "user", "content": [{"type": "image", "image": f"data:image/jpeg;base64,{b64}", "min_pixels": 3136, "max_pixels": 2116800}]},
+        {
+            "role": "user",
+            "content": [{
+                "type": "image",
+                "image": f"data:image/jpeg;base64,{b64}",
+                "min_pixels": IMAGE_MIN_PIXELS,
+                "max_pixels": IMAGE_MAX_PIXELS,
+            }],
+        },
     ]
+
+
+def _instruction_with_hints(task_config: dict) -> str:
+    text = (task_config.get("instruction") or "").strip()
+    domain = (task_config.get("domain") or "").strip().lower()
+    if domain == "gimp":
+        text += "\n\nImportant: Use GIMP (the image editor), not Ubuntu Settings/System Settings."
+    return text
+
+
+def _make_action_signature(parsed_responses, actions) -> str:
+    try:
+        if parsed_responses:
+            compact = []
+            for pr in parsed_responses:
+                compact.append({
+                    "action_type": pr.get("action_type"),
+                    "action_inputs": pr.get("action_inputs", {}),
+                })
+            return repr(compact)
+        return repr(actions)
+    except Exception:
+        return "sig_error"
+
+
+def _append_screenshot_message(messages: list, screenshot) -> bool:
+    """Append a screenshot image message to history; returns True on success."""
+    try:
+        if screenshot is None:
+            return False
+        if not isinstance(screenshot, bytes):
+            from PIL import Image
+            buf = BytesIO()
+            Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot).save(buf, format="JPEG")
+            screenshot = buf.getvalue()
+        b64 = base64.b64encode(screenshot).decode("utf-8")
+        messages.append({
+            "role": "user",
+            "content": [{
+                "type": "image",
+                "image": f"data:image/jpeg;base64,{b64}",
+                "min_pixels": IMAGE_MIN_PIXELS,
+                "max_pixels": IMAGE_MAX_PIXELS,
+            }],
+        })
+        return True
+    except Exception:
+        print("Failed to append step screenshot to history_messages")
+        print(traceback.format_exc())
+        return False
+
+
+def _safe_env_pause(env) -> None:
+    fn = getattr(env, "pause", None)
+    if callable(fn):
+        try:
+            fn()
+        except Exception:
+            print("env.pause() failed (ignored)")
+            print(traceback.format_exc())
+
+
+def _safe_env_unpause(env) -> None:
+    fn = getattr(env, "unpause", None)
+    if callable(fn):
+        try:
+            fn()
+        except Exception:
+            print("env.unpause() failed (ignored)")
+            print(traceback.format_exc())
 
 
 def _get_env():
@@ -311,11 +396,13 @@ def _get_env():
 
 @app.post("/env/reset")
 def env_reset(body: ResetRequest):
-    global history_messages, is_done, step_counter, instruction
+    global history_messages, is_done, step_counter, instruction, _last_action_signature, _repeat_action_count
     task_config = body.task_config
-    instruction = task_config.get("instruction", "")
+    instruction = _instruction_with_hints(task_config)
     step_counter = 0
     is_done = False
+    _last_action_signature = None
+    _repeat_action_count = 0
     history_messages = []
     env = _get_env()
 
@@ -333,7 +420,7 @@ def env_reset(body: ResetRequest):
         is_done = True
         return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": 0.0}
 
-    env.pause()
+    _safe_env_pause(env)
     screenshot = obs.get("screenshot")
     if screenshot is None:
         print("Reset: screenshot is None (VM/container not ready or get_screenshot failed). Returning obs_messages=None.")
@@ -361,7 +448,7 @@ def env_reset(body: ResetRequest):
 
 @app.post("/env/step")
 def env_step(body: StepRequest):
-    global history_messages, is_done, step_counter
+    global history_messages, is_done, step_counter, _last_action_signature, _repeat_action_count
     env = _get_env()
     prediction = body.prediction
     action_parse_res_factor = 1000
@@ -370,6 +457,7 @@ def env_step(body: StepRequest):
     min_pixels = 100 * 28 * 28
     obs_image_height, obs_image_width = 1080, 1920
 
+    parsed_responses = []
     try:
         parsed_responses = parse_action_to_structure_output(
             prediction, action_parse_res_factor, obs_image_height, obs_image_width, model_type, max_pixels, min_pixels
@@ -414,23 +502,49 @@ def env_step(body: StepRequest):
     parse_status = "fail" if format_reward < 0 else "ok"
     print(f"step_parse: {parse_status} actions=[{action_preview}] format_reward={format_reward:.2f} pred_preview={pred_preview!r}")
 
-    env.unpause()
+    action_signature = _make_action_signature(parsed_responses, actions)
+    if action_signature == _last_action_signature:
+        _repeat_action_count += 1
+    else:
+        _last_action_signature = action_signature
+        _repeat_action_count = 1
+    print(f"step_trace: repeat_action_count={_repeat_action_count} threshold={REPEAT_ACTION_THRESHOLD}")
+
+    # Keep trajectory order consistent: assistant action text, then resulting screenshot(s).
+    history_messages.append({"role": "assistant", "content": [{"type": "text", "text": add_box_token(prediction)}]})
+
+    if _repeat_action_count >= REPEAT_ACTION_THRESHOLD:
+        # Cut off obvious local loops (same parsed action repeated with no progress signal).
+        format_reward = max(format_reward - REPEAT_ACTION_PENALTY, -1.0)
+        is_done = True
+        print(
+            f"loop_breaker: repeated action signature x{_repeat_action_count}; "
+            f"terminating episode with penalty {REPEAT_ACTION_PENALTY:.2f}"
+        )
+        return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
+
+    _safe_env_unpause(env)
     obs = None
     step_successful = False
+    appended_any_step_screenshot = False
     for action in actions:
-        obs, reward, step_done, info = env.step(action, pause=0.5)
+        obs, reward, step_done, info = env.step(action, pause=ACTION_PAUSE_SEC)
         if step_done:
             is_done = True
         step_counter += 1
+        has_screenshot = obs is not None and obs.get("screenshot") is not None
+        if has_screenshot:
+            step_successful = True
+            # Capture intermediate GUI state after each executed action so the next decision
+            # sees UI changes even when one model response contains multiple actions.
+            if _append_screenshot_message(history_messages, obs.get("screenshot")):
+                appended_any_step_screenshot = True
         if step_counter >= max_steps:
             is_done = True
         if is_done:
             break
-        # Check if step executed successfully (obs is valid)
-        if obs is not None and obs.get("screenshot") is not None:
-            step_successful = True
     
-    env.pause()
+    _safe_env_pause(env)
     
     # Enhance format_reward based on step execution success
     if step_successful:
@@ -440,8 +554,6 @@ def env_step(body: StepRequest):
         is_done = True
         format_reward = max(format_reward - 0.1, -1.0)  # Penalty for no observation
 
-    history_messages.append({"role": "assistant", "content": [{"type": "text", "text": add_box_token(prediction)}]})
-
     if is_done:
         return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
 
@@ -450,17 +562,10 @@ def env_step(body: StepRequest):
         format_reward = max(format_reward - 0.1, -1.0)  # Penalty for missing screenshot
         return {"env_idx": 0, "obs_messages": None, "is_done": True, "format_reward": format_reward}
 
-    screenshot = obs["screenshot"]
-    if not isinstance(screenshot, bytes):
-        from PIL import Image
-        buf = BytesIO()
-        Image.open(BytesIO(screenshot) if isinstance(screenshot, bytes) else screenshot).save(buf, format="JPEG")
-        screenshot = buf.getvalue()
-    b64 = base64.b64encode(screenshot).decode("utf-8")
-    history_messages.append({
-        "role": "user",
-        "content": [{"type": "image", "image": f"data:image/jpeg;base64,{b64}", "min_pixels": 3136, "max_pixels": 2116800}],
-    })
+    # Backward-compatible path: if no screenshot was appended in the action loop
+    # (e.g. unusual provider behavior), append the final screenshot now.
+    if not appended_any_step_screenshot:
+        _append_screenshot_message(history_messages, obs["screenshot"])
 
     return {
         "env_idx": 0,
@@ -491,7 +596,7 @@ def env_evaluate():
                 status_code=503,
                 detail="Env not ready for evaluation (no setup_controller; reset may have failed). Client should retry.",
             )
-        env.unpause()
+        _safe_env_unpause(env)
         score = env.evaluate()
         print(f"Evaluation completed: score={score}, instruction={instruction}, step_counter={step_counter}")
         return float(score)

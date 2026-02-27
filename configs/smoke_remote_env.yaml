@@ -17,20 +17,19 @@
 
 data:
   # Use OSWorld/evaluation_examples so dataset finds examples/<domain>/<id>.json
-  train_files: OSWorld/evaluation_examples/test_smoke_4.json
-  val_files: OSWorld/evaluation_examples/test_smoke_4.json
+  train_files: OSWorld/evaluation_examples/test_smoke_8.json
+  val_files: OSWorld/evaluation_examples/test_smoke_8.json
   prompt_key: instruction
   answer_key: ""
   image_key: images
-  # Context length for multi-turn trajectory with screenshots.
-  # 8192 allows ~8-10 steps of history; increase to 16384 for full 16-step context if memory permits.
-  max_prompt_length: 8192
-  max_response_length: 512
+  # Context length: 4096 keeps ~4-5 steps of history; reduces peak memory vs 8192.
+  max_prompt_length: 2048
+  max_response_length: 128
   rollout_batch_size: 1  # 1 env on remote server (smoke_4gpu uses 4)
   val_batch_size: -1
   shuffle: true
   seed: 1
-  max_pixels: 262144   # fit for 1920 x 1280
+  max_pixels: 129024   # ~360x360; reduces image token count and memory
   min_pixels: 2800
 
 algorithm:
@@ -42,10 +41,8 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 8  # Must be >= n_gpus_per_node for FSDP. Batch is padded to this size if smaller.
-    # global_batch_size is multiplied by rollout.n internally (8*2=16), so per-device = 16/8 = 2.
-    # Must equal global_batch_size_per_device to avoid gradient accumulation (required for FSDP CPU offload).
-    micro_batch_size_per_device_for_update: 2
+    global_batch_size: 2  # With rollout.n=2 -> effective 4, per-device = 4/4 = 1
+    micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
     padding_free: false
@@ -57,7 +54,7 @@ worker:
       model_path: ByteDance-Seed/UI-TARS-2B-SFT
       enable_gradient_checkpointing: true
       trust_remote_code: true
-      freeze_vision_tower: false
+      freeze_vision_tower: true
       override_config:
         _attn_implementation: "eager"
     optim:
@@ -67,39 +64,35 @@ worker:
       lr_warmup_ratio: 0.05
     fsdp:
       enable_full_shard: true
-      # Enable FSDP CPU offload in addition to manual offload for maximum memory reduction
-      enable_cpu_offload: true
-      # Disable rank0 init to reduce peak GPU memory during FSDP model initialization
+      enable_cpu_offload: false
       enable_rank0_init: false
     offload:
-      # Enable CPU offload for both params and optimizer to minimize GPU memory during init
-      offload_params: true
-      offload_optimizer: true
+      offload_params: false
+      offload_optimizer: false
 
   rollout:
-    temperature: 0.7
-    n: 2  # GRPO requires n > 1; with 1 env these run sequentially (2 rollouts per task)
-    # Increase GPU memory utilization for vLLM KV cache (was 0.05, too low after FSDP init)
-    gpu_memory_utilization: 0.10
-    # Enable eager mode to disable torch.compile and reduce memory usage
+    temperature: 0.2
+    top_p: 0.8
+    top_k: 40
+    n: 2  # GRPO requires n > 1; with 1 env these run sequentially
+    gpu_memory_utilization: 0.15
     enforce_eager: true
     enable_chunked_prefill: false
     tensor_parallel_size: 1
-    limit_images: 10
-    # Qwen2VL/UI-TARS image processor expects size.shortest_edge/longest_edge (not min/max_pixels from repo config).
-    # Keep image_max_pixels at 2116800 so vLLM profiler expected token count matches processed dummy (26010); data.max_pixels still resizes env images to 262144.
+    limit_images: 5
     image_min_pixels: 3136
     image_max_pixels: 2116800
     # Must be >= max_prompt_length + max_response_length for vLLM
-    max_num_batched_tokens: 16384
+    max_num_batched_tokens: 4096
     val_override_config:
-      temperature: 0.5
+      temperature: 0.2
+      top_p: 1.0
+      top_k: -1
       n: 1
 
   ref:
     fsdp:
       enable_full_shard: true
-      # Keep ref on CPU to free GPU for actor_rollout (avoids OOM at barrier during init)
       enable_cpu_offload: true
     offload:
       offload_params: true
@@ -111,17 +104,15 @@ worker:
 
 env:
   num_envs: 1  # 1 env with sequential rollouts (rollout.n=2 -> 2 trajectories per task, run sequentially)
-  max_steps: 16
+  max_steps: 32
   screen_size: [1920, 1080]
-  # EC2 IP where the remote env server runs. Test: curl -s -X POST http://54.91.149.177:15001/env/reset -H "Content-Type: application/json" -d '{"task_config":{}}'
-  # 503 with "AWS provider requires... boto3" -> on that EC2 host: pip install boto3 && aws configure (or IAM role with RunInstances, DescribeInstances, StartInstances, StopInstances).
-  remote_server_url: "http://54.91.149.177:15001"
+  remote_server_url: "http://3.88.110.176:15001"
 
 trainer:
-  total_episodes: 10
+  total_episodes: 30
   logger: ["console", "wandb"]
   project_name: arpo-smoke-test
   experiment_name: uitars_2b_remote_env
   wandb_entity: hanszhu05-university-of-pennsylvania
-  n_gpus_per_node: 8
+  n_gpus_per_node: 1
   nnodes: 1
